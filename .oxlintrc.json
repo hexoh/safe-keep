@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "vue"],
+  "env": {
+    "browser": true
+  },
+  "categories": {
+    "correctness": "error", // 只检查错误
+    "suspicious": "error", // 可疑代码
+    "perf": "error", // 性能问题
+    "style": "off", // 风格交给ESLint
+    "pedantic": "off" // 挑剔规则关闭
+  }
+}
