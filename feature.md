@@ -2,7 +2,9 @@
 
 ## 一、项目概述
 
-Safe Keep 是一款高效、安全、操作简单的照片与视频备份桌面工具，采用 Tauri 2.x + Rust + Vue 3 技术栈开发，专注于将手机、SD 卡、相机等设备中的媒体文件快速备份到本地硬盘或外部存储。
+Safe Keep 是一款高效、安全、操作简单的照片与视频备份桌面工具，采用 Tauri 2.x + Rust + Vue 3 技术栈开发，专注于将 Android 手机、SD 卡、U 盘、相机等设备中的媒体文件快速备份到本地硬盘或外部存储。
+
+**iOS / iPhone**：不支持。
 
 ---
 
@@ -184,7 +186,50 @@ CREATE TABLE IF NOT EXISTS settings (
 - 删除成功后更新 `files.status = 'deleted'`，写入 `delete_history`
 - 删除失败时记录错误，不影响其他文件的删除
 
-#### 3.1.6 按条件筛选清理模块
+#### 3.1.6 设备类型识别模块
+
+**作用**：根据用户选择的源路径，自动判断设备连接方式，进而调整扫描策略、删除行为、用户提示。
+
+**判断逻辑**：
+
+| 判断方法 | 判定结果 |
+|---------|---------|
+| 路径前缀为 `\\?\` 或使用 `GetVolumeInformation` 返回 `MTP` 驱动类型（Windows） | MTP 设备 |
+| 路径挂载点为 `/run/user/*/gvfs/` 或 `/var/run/user/*/gvfs/`（Linux） | MTP 设备 |
+| 路径所在卷的 `DriveType` 为 `DRIVE_REMOVABLE`（Windows `GetDriveType`） | USB 可移动磁盘 |
+| 路径所在卷的 `DriveType` 为 `DRIVE_FIXED` | 本地硬盘 |
+| macOS 下通过 `statfs` 获取文件系统类型，`mtmfs` 或 `fusefs` 前缀 | MTP 设备 |
+| macOS 下路径为 `/Volumes/*` 且非系统盘 | 可移动磁盘 |
+
+**Rust 实现**：
+```rust
+enum DeviceType {
+    MTP,             // Android 手机 MTP 连接
+    RemovableDisk,   // U 盘、SD 卡读卡器
+    LocalDisk,       // 本地硬盘或 SSD
+    Unknown,         // 无法识别
+}
+
+fn detect_device_type(path: &str) -> DeviceType {
+    // Windows: GetDriveTypeW / GetVolumeInformationW
+    // macOS: statfs -> f_fstypename
+    // Linux: statfs -> f_type
+}
+```
+
+**对业务的影响**：
+
+| 设备类型 | 扫描方式 | 删除方式 | 可写文件 | 还原速度 |
+|---------|---------|---------|---------|---------|
+| MTP | 全量扫描（MTP 协议遍历较慢） | 永久删除（不可恢复） | ⚠️ 写入慢且不可靠 | 较慢（MTP 写入比读取慢） |
+| RemovableDisk | 全量扫描（快速） | 可入回收站 | ✅ 完全自由读写 | 正常 |
+| LocalDisk | 全量扫描（最快） | 可入回收站 | ✅ 完全自由读写 | 正常 |
+
+**前端展示**：
+- 路径选择后，在路径旁边显示设备类型图标（📱 MTP / 💾 USB / 💻 Local）
+- 若为 MTP 设备，删除页面的提示语改为"此设备为 MTP 连接，删除后不可恢复，但可从备份目录还原"
+
+#### 3.1.7 按条件筛选清理模块
 
 - 按时间段筛选备份成功的源文件：
   - 最近 N 天（7、30、90、180、365）
@@ -194,7 +239,7 @@ CREATE TABLE IF NOT EXISTS settings (
 - 按文件大小筛选（最小值/最大值）
 - 筛选结果分页展示，提供总释放空间预估
 
-#### 3.1.7 自动升级模块
+#### 3.1.8 自动升级模块
 
 - 依赖 `tauri-plugin-updater` 实现，无需自有服务器
 - **更新源**：GitHub Releases（解析 Release Tag 与版本号对比）
@@ -209,7 +254,7 @@ CREATE TABLE IF NOT EXISTS settings (
   - Linux: `.deb` + AppImage
 - **版本号规范**：语义化版本 `MAJOR.MINOR.PATCH`
 
-#### 3.1.8 文件还原模块
+#### 3.1.9 文件还原模块
 
 **设计背景**：MTP 手机删除文件是直接删除、不可恢复。因此安全删除的"后门"是从备份还原。
 
@@ -378,6 +423,10 @@ safe-keep/
 │   ├── src/
 │   │   ├── main.rs             # Tauri 入口
 │   │   ├── lib.rs              # 模块导出
+│   │   ├── device/             # 设备类型检测（MTP / U盘 / 本地磁盘）
+│   │   │   ├── mod.rs
+│   │   │   ├── detect.rs       # 判断设备类型
+│   │   │   └── platform.rs     # 各平台实现（Win / macOS / Linux）
 │   │   ├── commands/           # Tauri IPC 命令
 │   │   │   ├── mod.rs
 │   │   │   ├── scan.rs         # 扫描相关命令
@@ -566,3 +615,25 @@ safe-keep/
 
 ### 6.4 状态管理
 - **Vue Pinia**：替代 Vuex，轻量 + TypeScript 友好，管理全局备份状态
+
+---
+
+## 七、设备兼容性详表
+
+| 设备类型 | 连接方式 | 显示为盘符？ | 可读文件？ | 可写文件？ | 可删除？ | 删除后可恢复？ | 本 App 支持？ |
+|---------|---------|------------|-----------|----------|---------|--------------|-------------|
+| **U 盘 / 移动硬盘** | USB | ✅ | ✅ | ✅ 自由读写 | ✅ 回收站 | ✅ | ✅ **完全支持** |
+| **SD 卡（读卡器）** | USB 读卡器 | ✅ | ✅ | ✅ 自由读写 | ✅ 回收站 | ✅ | ✅ **完全支持** |
+| **相机（USB 直连）** | PTP/MTP | ⚠️ 部分相机 | ✅ | ⚠️ 通常只读 | ❌ | ❌ | ⚠️ 仅读取备份 |
+| **Android 手机（MTP）** | USB 数据线 | ❌ | ✅ | ⚠️ 可写但慢 | ✅ 永久删除 | ❌ | ✅ **全功能支持**（含还原） |
+| **iPhone / iPad** | — | — | — | — | — | — | **不支持** |
+
+**MTP 与本地盘符的区分方式**：
+
+| 判断方法 | Windows | macOS | Linux |
+|---------|---------|-------|-------|
+| API | `GetDriveTypeW` 返回 `DRIVE_REMOTE` | `statfs` → `f_fstypename` 为 `mtmfs` 或 `fusefs` | `statfs` → `f_type` 或路径含 `gvfs` |
+| 路径特征 | `Computer\` 下不显示盘符 | `/Volumes/` 下出现但不可写测试可判定 | `/run/user/*/gvfs/` 路径 |
+| 写测试 | 尝试创建临时文件失败 | 尝试写入失败 | 尝试写入失败 |
+
+
