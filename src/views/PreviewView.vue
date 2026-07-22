@@ -8,6 +8,7 @@ const router = useRouter()
 const { scanning, progress, result, error, scan } = useScan()
 
 const selectedPaths = ref<string[]>([])
+const destPath = computed(() => route.query.dest as string)
 
 function selectAll() {
   if (result.value) {
@@ -39,6 +40,16 @@ const totalFiles = computed(() => result.value?.total_files ?? 0)
 const totalSize = computed(() => {
   if (!result.value) return '0 B'
   const bytes = result.value.total_size
+  return formatBytes(bytes)
+})
+
+const newFiles = computed(() => result.value?.files.filter((f) => f.status === 'new') ?? [])
+const backedUpFiles = computed(
+  () => result.value?.files.filter((f) => f.status === 'backed_up') ?? []
+)
+const changedFiles = computed(() => result.value?.files.filter((f) => f.status === 'changed') ?? [])
+
+function formatBytes(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let size = bytes
   let unitIdx = 0
@@ -47,7 +58,7 @@ const totalSize = computed(() => {
     unitIdx++
   }
   return `${size.toFixed(unitIdx > 0 ? 2 : 0)} ${units[unitIdx]}`
-})
+}
 
 const selectedSize = computed(() => {
   if (!result.value || selectedPaths.value.length === 0) return '0 B'
@@ -66,6 +77,21 @@ const selectedSize = computed(() => {
 
 function goBack() {
   router.push({ name: 'home' })
+}
+
+function startBackup() {
+  if (!result.value || !destPath.value) return
+
+  const selected = result.value.files.filter((f) => selectedPaths.value.includes(f.path))
+
+  router.push({
+    name: 'backup',
+    query: {
+      source: route.query.source as string,
+      dest: destPath.value,
+      files: JSON.stringify(selected)
+    }
+  })
 }
 </script>
 
@@ -88,10 +114,16 @@ function goBack() {
       <div class="stats-row">
         <StatsCard :title="$t('preview.total_files')" :value="totalFiles" type="primary" />
         <StatsCard :title="$t('preview.total_size')" :value="totalSize" type="info" />
+        <StatsCard :title="$t('preview.new_files')" :value="newFiles.length" type="success" />
         <StatsCard
-          :title="$t('preview.selected_count')"
-          :value="selectedPaths.length"
-          type="success"
+          :title="$t('preview.backed_up_files')"
+          :value="backedUpFiles.length"
+          type="info"
+        />
+        <StatsCard
+          :title="$t('preview.changed_files')"
+          :value="changedFiles.length"
+          type="warning"
         />
       </div>
 
@@ -105,7 +137,7 @@ function goBack() {
         </el-text>
         <div class="action-buttons">
           <el-button @click="goBack">{{ $t('preview.go_back') }}</el-button>
-          <el-button type="primary" :disabled="selectedPaths.length === 0">
+          <el-button type="primary" :disabled="selectedPaths.length === 0" @click="startBackup">
             {{ $t('preview.start_backup') }}
           </el-button>
         </div>

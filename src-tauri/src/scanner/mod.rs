@@ -12,6 +12,8 @@ pub struct FileEntry {
   pub file_size: u64,
   pub modified_at: i64,
   pub is_image: bool,
+  #[serde(default)]
+  pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

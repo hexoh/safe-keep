@@ -1,3 +1,5 @@
+export type FileStatus = 'new' | 'backed_up' | 'changed'
+
 export interface FileEntry {
   path: string
   relative_path: string
@@ -5,6 +7,7 @@ export interface FileEntry {
   file_size: number
   modified_at: number
   is_image: boolean
+  status: FileStatus
 }
 
 export interface ScanProgress {

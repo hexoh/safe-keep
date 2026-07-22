@@ -106,6 +106,7 @@ impl FileScanner {
             })
             .unwrap_or(0),
           is_image,
+          status: String::new(),
         })
       })
       .collect();

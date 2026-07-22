@@ -1,4 +1,4 @@
-import { ref, readonly } from 'vue'
+import { ref } from 'vue'
 import type { ScanOptions, ScanProgress, ScanResult } from '@/types/file'
 import { startScan, cancelScan, onScanProgress, onScanComplete, onScanError } from '@/api/scan'
 
@@ -49,11 +49,11 @@ export function useScan() {
   }
 
   return {
-    scanning: readonly(scanning),
-    cancelled: readonly(cancelled),
-    progress: readonly(progress),
-    result: readonly(result),
-    error: readonly(error),
+    scanning,
+    cancelled,
+    progress,
+    result,
+    error,
     scan,
     cancel
   }

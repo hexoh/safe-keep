@@ -3,13 +3,17 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, State};
 
+use crate::database::compare;
+use crate::database::Database;
 use crate::scanner::progress::ScanProgressEmitter;
 use crate::scanner::walk::FileScanner;
-use crate::scanner::ScanResult;
+use crate::scanner::{FileEntry, ScanResult};
 
 #[derive(serde::Deserialize)]
 pub struct ScanOptions {
   pub source_path: String,
+  #[allow(dead_code)]
+  pub dest_path: Option<String>,
   pub include_images: Option<bool>,
   pub include_videos: Option<bool>,
   pub min_size: Option<u64>,
@@ -25,6 +29,7 @@ pub async fn start_scan(
   app: AppHandle,
   options: ScanOptions,
   state: State<'_, ScannerState>,
+  db: State<'_, Database>,
 ) -> Result<ScanResult, String> {
   let path = Path::new(&options.source_path);
   if !path.exists() {
@@ -33,6 +38,13 @@ pub async fn start_scan(
   if !path.is_dir() {
     return Err(format!("Path is not a directory: {}", options.source_path));
   }
+
+  let source_root = path
+    .canonicalize()
+    .map_err(|e| e.to_string())?
+    .to_string_lossy()
+    .to_string();
+
   let scanner = FileScanner::new();
   {
     let mut guard = state.scanner.lock().map_err(|e| e.to_string())?;
@@ -41,32 +53,54 @@ pub async fn start_scan(
 
   let progress = ScanProgressEmitter::new(Some(Arc::new(app.clone())));
 
-  let mut result = {
+  let scanned = {
     let guard = state.scanner.lock().map_err(|e| e.to_string())?;
     let scanner = guard.as_ref().ok_or("No scanner initialized")?;
     scanner.scan(path, progress)?
   };
 
+  let mut files: Vec<FileEntry> = scanned.files;
+
   if let Some(min) = options.min_size {
-    result.files.retain(|f| f.file_size >= min);
+    files.retain(|f| f.file_size >= min);
   }
   if let Some(max) = options.max_size {
-    result.files.retain(|f| f.file_size <= max);
+    files.retain(|f| f.file_size <= max);
   }
   if options.include_images == Some(false) {
-    result.files.retain(|f| !f.is_image);
+    files.retain(|f| !f.is_image);
   }
   if options.include_videos == Some(false) {
-    result.files.retain(|f| f.is_image);
+    files.retain(|f| f.is_image);
   }
 
-  result.total_files = result.files.len() as u64;
-  result.total_size = result.files.iter().map(|f| f.file_size).sum();
+  // 增量对比：与数据库记录比对，标记状态
+  let files = compare::compute_file_statuses(&db, &source_root, files)?;
 
-  app.emit("scan:complete", serde_json::json!({ "total": result.total_files }))
+  let total_files = files.len() as u64;
+  let total_size = files.iter().map(|f| f.file_size).sum();
+
+  let new_count = files.iter().filter(|f| f.status == "new").count();
+  let backed_up_count = files.iter().filter(|f| f.status == "backed_up").count();
+  let changed_count = files.iter().filter(|f| f.status == "changed").count();
+
+  app
+    .emit(
+      "scan:complete",
+      serde_json::json!({
+        "total": total_files,
+        "new": new_count,
+        "backed_up": backed_up_count,
+        "changed": changed_count
+      }),
+    )
     .map_err(|e| e.to_string())?;
 
-  Ok(result)
+  Ok(ScanResult {
+    total_files,
+    total_size,
+    files,
+  })
 }
 
 #[tauri::command]

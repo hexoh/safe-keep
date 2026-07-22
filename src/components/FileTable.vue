@@ -8,6 +8,12 @@ defineProps<{
 
 const selected = defineModel<string[]>('selected', { default: () => [] })
 
+const statusTag = {
+  new: 'success',
+  backed_up: 'info',
+  changed: 'warning'
+} as const
+
 function formatSize(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let size = bytes
@@ -47,6 +53,13 @@ function formatDate(timestamp: number): string {
     <el-table-column :label="$t('preview.modified_at')" width="180" sortable>
       <template #default="{ row }: { row: FileEntry }">
         {{ formatDate(row.modified_at) }}
+      </template>
+    </el-table-column>
+    <el-table-column :label="$t('preview.status')" width="100" sortable>
+      <template #default="{ row }: { row: FileEntry }">
+        <el-tag :type="statusTag[row.status] || 'info'" size="small">
+          {{ $t(`status.${row.status}`) }}
+        </el-tag>
       </template>
     </el-table-column>
   </el-table>
