@@ -5,8 +5,6 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 const theme = ref<ThemeMode>('system')
 
 function applyTheme(mode: ThemeMode) {
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-
   if (mode === 'system') {
     document.documentElement.removeAttribute('data-theme')
   } else {

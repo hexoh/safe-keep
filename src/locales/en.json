@@ -8,6 +8,7 @@
   "nav.settings": "Settings",
 
   "home.title": "Safe Keep",
+  "home.subtitle": "Safe Keep — Photo Backup Desktop App",
   "home.source_path": "Source Path",
   "home.dest_path": "Destination Path",
   "home.select_folder": "Select Folder",

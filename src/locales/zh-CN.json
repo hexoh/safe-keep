@@ -8,6 +8,7 @@
   "nav.settings": "设置",
 
   "home.title": "Safe Keep",
+  "home.subtitle": "归影 — 照片备份桌面软件",
   "home.source_path": "源路径",
   "home.dest_path": "目标路径",
   "home.select_folder": "选择文件夹",
