@@ -33,6 +33,13 @@ Pre-commit hook runs: `ts:check` → `lint:lint-staged`. Commits must pass conve
 - **Element Plus style**: full import in dev (`VITE_USE_ALL_ELEMENT_PLUS_STYLE=true`), on-demand in prod
 - **Tauri dev**: `beforeDevCommand` = `pnpm dev`, `beforeBuildCommand` = `pnpm build`, frontend served at `http://localhost:1420`
 
+## Coding conventions
+
+- **Filenames**: `kebab-case` (two-or-more-words.ts, never `twoOrMoreWords.ts` or `two_or_more.ts`)
+- **Variables/functions**: `camelCase` (never snake_case or PascalCase for variables/functions)
+- **Reusability**: extract shared logic into composables, utilities, or helpers; avoid code duplication
+- **Components**: PascalCase (Vue convention), filenames still `kebab-case`
+
 ## Rust backend (src-tauri)
 
 - `tauri 2.x`, no custom IPC commands defined yet (only `core:default` capability)
