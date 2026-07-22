@@ -65,7 +65,14 @@
   "cleanup.execute": "Execute Cleanup",
   "cleanup.confirm_title": "Confirm Cleanup",
   "cleanup.confirm_message": "Are you sure you want to delete {count} selected files? This action cannot be undone.",
+  "cleanup.total_files": "Total Files",
   "cleanup.total_release": "Space to Free",
+  "cleanup.selected_count": "Selected",
+  "cleanup.backed_up_at": "Backup Time",
+  "cleanup.completed": "Cleanup Complete",
+  "cleanup.delete_strategy": "Delete Strategy",
+  "cleanup.permanent_delete": "Permanent Delete",
+  "cleanup.move_to_trash": "Move to Trash",
   "cleanup.result_success": "Deleted",
   "cleanup.result_failed": "Failed",
   "cleanup.result_released": "Freed",
@@ -135,5 +142,10 @@
   "common.loading": "Loading",
   "common.error": "Error",
   "common.success": "Success",
-  "common.warning": "Warning"
+  "common.warning": "Warning",
+  "common.days": "days",
+  "common.all": "All",
+  "common.images": "Images",
+  "common.videos": "Videos",
+  "common.processing": "Processing"
 }

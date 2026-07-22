@@ -65,7 +65,14 @@
   "cleanup.execute": "执行清理",
   "cleanup.confirm_title": "确认清理",
   "cleanup.confirm_message": "确定要删除选中的 {count} 个文件吗？此操作不可撤销。",
+  "cleanup.total_files": "文件总数",
   "cleanup.total_release": "可释放空间",
+  "cleanup.selected_count": "已选",
+  "cleanup.backed_up_at": "备份时间",
+  "cleanup.completed": "清理完成",
+  "cleanup.delete_strategy": "删除策略",
+  "cleanup.permanent_delete": "永久删除",
+  "cleanup.move_to_trash": "移入回收站",
   "cleanup.result_success": "成功删除",
   "cleanup.result_failed": "失败",
   "cleanup.result_released": "已释放",
@@ -135,5 +142,10 @@
   "common.loading": "加载中",
   "common.error": "错误",
   "common.success": "成功",
-  "common.warning": "警告"
+  "common.warning": "警告",
+  "common.days": "天",
+  "common.all": "全部",
+  "common.images": "图片",
+  "common.videos": "视频",
+  "common.processing": "处理中"
 }
