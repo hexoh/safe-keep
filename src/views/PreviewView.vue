@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { useScan } from '@/composables/useScan'
-// import type { FileEntry } from '@/types/file'
+import { formatBytes } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,7 +18,6 @@ function selectAll() {
 
 onMounted(async () => {
   const source = route.query.source as string
-  // const dest = route.query.dest as string
 
   if (!source) {
     router.push({ name: 'home' })
@@ -39,8 +38,7 @@ onMounted(async () => {
 const totalFiles = computed(() => result.value?.total_files ?? 0)
 const totalSize = computed(() => {
   if (!result.value) return '0 B'
-  const bytes = result.value.total_size
-  return formatBytes(bytes)
+  return formatBytes(result.value.total_size)
 })
 
 const newFiles = computed(() => result.value?.files.filter((f) => f.status === 'new') ?? [])
@@ -49,30 +47,12 @@ const backedUpFiles = computed(
 )
 const changedFiles = computed(() => result.value?.files.filter((f) => f.status === 'changed') ?? [])
 
-function formatBytes(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = bytes
-  let unitIdx = 0
-  while (size >= 1024 && unitIdx < units.length - 1) {
-    size /= 1024
-    unitIdx++
-  }
-  return `${size.toFixed(unitIdx > 0 ? 2 : 0)} ${units[unitIdx]}`
-}
-
 const selectedSize = computed(() => {
   if (!result.value || selectedPaths.value.length === 0) return '0 B'
   const bytes = result.value.files
     .filter((f) => selectedPaths.value.includes(f.path))
     .reduce((acc, f) => acc + f.file_size, 0)
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = bytes
-  let unitIdx = 0
-  while (size >= 1024 && unitIdx < units.length - 1) {
-    size /= 1024
-    unitIdx++
-  }
-  return `${size.toFixed(unitIdx > 0 ? 2 : 0)} ${units[unitIdx]}`
+  return formatBytes(bytes)
 })
 
 function goBack() {

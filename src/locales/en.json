@@ -54,6 +54,7 @@
   "backup.view_details": "View Details",
 
   "cleanup.title": "Cleanup",
+  "cleanup.source": "Source",
   "cleanup.filter_condition": "Filter Conditions",
   "cleanup.time_range": "Time Range",
   "cleanup.last_n_days": "Last N Days",
@@ -147,5 +148,6 @@
   "common.all": "All",
   "common.images": "Images",
   "common.videos": "Videos",
+  "common.retry": "Retry",
   "common.processing": "Processing"
 }

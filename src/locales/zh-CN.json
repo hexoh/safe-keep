@@ -54,6 +54,7 @@
   "backup.view_details": "查看详情",
 
   "cleanup.title": "清理管理",
+  "cleanup.source": "源路径",
   "cleanup.filter_condition": "筛选条件",
   "cleanup.time_range": "时间段",
   "cleanup.last_n_days": "最近 N 天",
@@ -147,5 +148,6 @@
   "common.all": "全部",
   "common.images": "图片",
   "common.videos": "视频",
+  "common.retry": "重试",
   "common.processing": "处理中"
 }

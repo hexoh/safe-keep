@@ -26,6 +26,15 @@ export interface BackupTask {
   avg_speed: number | null
 }
 
+export interface BackupHistoryEntry {
+  source_root: string
+  dest_path: string
+  total_files: number
+  total_bytes: number
+  backed_up_count: number
+  last_backed_up_at: string | null
+}
+
 export interface BackupProgress {
   total_files: number
   completed_files: number

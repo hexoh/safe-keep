@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useCleanup } from '@/composables/useCleanup'
 import { getSourceRoots } from '@/api/cleanup'
+import { formatBytes, formatDate } from '@/utils/format'
 import type { CleanupFilter, CleanupFile } from '@/types/cleanup'
 
 const { loading, dryRunResult, cleanupResult, progress, error, dryRun, execute, cancel } =
@@ -16,21 +17,6 @@ const permanent = ref(false)
 const step = ref<'filter' | 'preview' | 'executing' | 'result'>('filter')
 const selectedFiles = ref<CleanupFile[]>([])
 const selectAll = ref(true)
-
-function formatBytes(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = bytes
-  let unitIdx = 0
-  while (size >= 1024 && unitIdx < units.length - 1) {
-    size /= 1024
-    unitIdx++
-  }
-  return `${size.toFixed(unitIdx > 0 ? 2 : 0)} ${units[unitIdx]}`
-}
-
-function formatDate(ts: number): string {
-  return new Date(ts * 1000).toLocaleDateString()
-}
 
 onMounted(async () => {
   try {
@@ -97,7 +83,7 @@ const selectedFreed = computed(() => {
         <template #header>{{ $t('cleanup.filter_condition') }}</template>
 
         <el-form label-width="120px">
-          <el-form-item :label="$t('history.source')">
+          <el-form-item :label="$t('cleanup.source')">
             <el-select v-model="selectedSource" style="width: 100%">
               <el-option v-for="root in sourceRoots" :key="root" :label="root" :value="root" />
             </el-select>

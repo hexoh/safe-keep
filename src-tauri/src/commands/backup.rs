@@ -8,6 +8,8 @@ use crate::copier::conflict::ConflictStrategy;
 use crate::copier::parallel::FileCopier;
 use crate::copier::progress::BackupProgressEmitter;
 use crate::copier::{BackupFile, BackupResult};
+use crate::database::models::BackupHistoryEntry;
+use crate::database::queries;
 use crate::database::Database;
 
 pub struct BackupState {
@@ -134,4 +136,12 @@ pub async fn cancel_backup(state: State<'_, BackupState>) -> Result<(), String> 
   state.cancel.store(true, Ordering::SeqCst);
   state.paused.store(false, Ordering::SeqCst);
   Ok(())
+}
+
+#[tauri::command]
+pub async fn get_backup_history(
+  db: State<'_, Database>,
+) -> Result<Vec<BackupHistoryEntry>, String> {
+  let conn = db.conn.lock().map_err(|e| e.to_string())?;
+  queries::get_backup_history(&conn)
 }

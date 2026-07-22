@@ -3,15 +3,17 @@ mod copier;
 mod database;
 mod deleter;
 mod hasher;
+mod restorer;
 mod scanner;
 mod utils;
 
 use commands::backup::{
-  cancel_backup, pause_backup, resume_backup, start_backup, BackupState,
+  cancel_backup, get_backup_history, pause_backup, resume_backup, start_backup, BackupState,
 };
 use commands::cleanup::{
   cancel_cleanup, dry_run_cleanup, execute_cleanup, get_source_roots, CleanupState,
 };
+use commands::restore::{cancel_restore, get_restorable_files, start_restore, RestoreState};
 use commands::scan::{cancel_scan, start_scan, ScannerState};
 use database::Database;
 use tauri::Manager;
@@ -24,6 +26,8 @@ pub fn run() {
     })
     .manage(BackupState::new())
     .manage(CleanupState::new())
+    .manage(RestoreState::new())
+    .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -48,10 +52,14 @@ pub fn run() {
       pause_backup,
       resume_backup,
       cancel_backup,
+      get_backup_history,
       dry_run_cleanup,
       execute_cleanup,
       cancel_cleanup,
       get_source_roots,
+      get_restorable_files,
+      start_restore,
+      cancel_restore,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

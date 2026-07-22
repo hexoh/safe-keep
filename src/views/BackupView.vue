@@ -1,30 +1,13 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { useBackup } from '@/composables/useBackup'
+import { formatBytes, formatDuration } from '@/utils/format'
 import type { FileEntry } from '@/types/file'
 
 const route = useRoute()
 const router = useRouter()
 
 const { running, paused, progress, result, logs, error, start, pause, resume, cancel } = useBackup()
-
-function formatBytes(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = bytes
-  let unitIdx = 0
-  while (size >= 1024 && unitIdx < units.length - 1) {
-    size /= 1024
-    unitIdx++
-  }
-  return `${size.toFixed(unitIdx > 0 ? 2 : 0)} ${units[unitIdx]}`
-}
-
-function formatDuration(secs: number): string {
-  if (secs < 60) return `${Math.round(secs)}s`
-  const m = Math.floor(secs / 60)
-  const s = Math.round(secs % 60)
-  return `${m}m ${s}s`
-}
 
 const overallPercentage = computed(() => {
   if (!progress.value) return 0

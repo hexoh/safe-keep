@@ -1,6 +1,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { BackupProgress } from '@/types/backup'
+import type { BackupHistoryEntry } from '@/types/backup'
+
+export async function getBackupHistory(): Promise<BackupHistoryEntry[]> {
+  return invoke<BackupHistoryEntry[]>('get_backup_history')
+}
 
 export interface StartBackupOptions {
   sourceRoot: string

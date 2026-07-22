@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection};
 
-use super::models::FileRecord;
+use super::models::{BackupHistoryEntry, FileRecord};
 use crate::deleter::CleanupFile;
 
 pub fn get_files_by_source(
@@ -152,6 +152,43 @@ pub fn get_cleanup_candidates(
     files.push(record.map_err(|e| e.to_string())?);
   }
   Ok(files)
+}
+
+/// 获取备份历史记录（按 source_root 分组）
+pub fn get_backup_history(conn: &Connection) -> Result<Vec<BackupHistoryEntry>, String> {
+  let mut stmt = conn
+    .prepare(
+      "SELECT
+         source_root,
+         COALESCE(MAX(dest_path), '') as dest_path,
+         COUNT(*) as total_files,
+         SUM(file_size) as total_bytes,
+         SUM(CASE WHEN status = 'backed_up' OR status = 'verified' THEN 1 ELSE 0 END) as backed_up_count,
+         MAX(backed_up_at) as last_backed_up_at
+       FROM files
+       GROUP BY source_root
+       ORDER BY last_backed_up_at DESC",
+    )
+    .map_err(|e| e.to_string())?;
+
+  let records = stmt
+    .query_map([], |row| {
+      Ok(BackupHistoryEntry {
+        source_root: row.get(0)?,
+        dest_path: row.get(1)?,
+        total_files: row.get(2)?,
+        total_bytes: row.get(3)?,
+        backed_up_count: row.get::<_, i64>(4)? as u64,
+        last_backed_up_at: row.get(5)?,
+      })
+    })
+    .map_err(|e| e.to_string())?;
+
+  let mut entries = Vec::new();
+  for record in records {
+    entries.push(record.map_err(|e| e.to_string())?);
+  }
+  Ok(entries)
 }
 
 /// 获取所有去重的源根目录列表
