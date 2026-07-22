@@ -11,6 +11,14 @@ pub struct BackupFile {
   pub file_size: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailedFile {
+  pub source_path: String,
+  pub relative_path: String,
+  pub file_size: u64,
+  pub error: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BackupResult {
   pub total_files: u64,
@@ -21,4 +29,5 @@ pub struct BackupResult {
   pub duration_secs: f64,
   pub avg_speed_mbps: f64,
   pub errors: Vec<String>,
+  pub failed_files: Vec<FailedFile>,
 }

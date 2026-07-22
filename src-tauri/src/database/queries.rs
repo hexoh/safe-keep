@@ -191,6 +191,32 @@ pub fn get_backup_history(conn: &Connection) -> Result<Vec<BackupHistoryEntry>, 
   Ok(entries)
 }
 
+/// 获取单条设置
+pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+  let mut stmt = conn
+    .prepare("SELECT value FROM settings WHERE key = ?1")
+    .map_err(|e| e.to_string())?;
+  let mut rows = stmt
+    .query_map(rusqlite::params![key], |row| row.get::<_, String>(0))
+    .map_err(|e| e.to_string())?;
+  match rows.next() {
+    Some(Ok(val)) => Ok(Some(val)),
+    Some(Err(e)) => Err(e.to_string()),
+    None => Ok(None),
+  }
+}
+
+/// 写入单条设置（插入或替换）
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+  conn
+    .execute(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+      rusqlite::params![key, value],
+    )
+    .map_err(|e| e.to_string())?;
+  Ok(())
+}
+
 /// 获取所有去重的源根目录列表
 pub fn get_source_roots(conn: &Connection) -> Result<Vec<String>, String> {
   let mut stmt = conn

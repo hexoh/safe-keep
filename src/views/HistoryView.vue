@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { getBackupHistory } from '@/api/backup'
-import { formatBytes, formatDuration } from '@/utils/format'
-import type { BackupHistoryEntry } from '@/types/backup'
+import { getBackupHistory, getFailedFiles, retryFailedBackup } from '@/api/backup'
+import { exportCsv, exportJson } from '@/api/export'
+import { formatBytes } from '@/utils/format'
+import type { BackupHistoryEntry, FailedFile, BackupResult } from '@/types/backup'
 
 const entries = ref<BackupHistoryEntry[]>([])
 const loading = ref(false)
+const exporting = ref(false)
 const error = ref<string | null>(null)
+
+const failedDialogVisible = ref(false)
+const currentFailedFiles = ref<FailedFile[]>([])
+const currentRetrySource = ref('')
+const currentRetryDest = ref('')
+const retrying = ref(false)
 
 async function fetchHistory() {
   loading.value = true
@@ -19,12 +27,73 @@ async function fetchHistory() {
   }
 }
 
+async function handleExportCsv() {
+  exporting.value = true
+  try {
+    await exportCsv(entries.value)
+  } catch (e: any) {
+    error.value = typeof e === 'string' ? e : (e?.message ?? 'Unknown error')
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function handleExportJson() {
+  exporting.value = true
+  try {
+    await exportJson(entries.value)
+  } catch (e: any) {
+    error.value = typeof e === 'string' ? e : (e?.message ?? 'Unknown error')
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function showFailedFiles(entry: BackupHistoryEntry) {
+  currentRetrySource.value = entry.source_root
+  currentRetryDest.value = entry.dest_path
+  try {
+    currentFailedFiles.value = await getFailedFiles(entry.source_root)
+    failedDialogVisible.value = true
+  } catch (e: any) {
+    error.value = typeof e === 'string' ? e : (e?.message ?? 'Unknown error')
+  }
+}
+
+async function handleRetry() {
+  retrying.value = true
+  try {
+    const result = await retryFailedBackup({
+      sourceRoot: currentRetrySource.value,
+      destPath: currentRetryDest.value,
+      files: currentFailedFiles.value
+    })
+    failedDialogVisible.value = false
+    ElMessage.success(`Retry complete: ${result.succeeded} succeeded, ${result.failed} failed`)
+    await fetchHistory()
+  } catch (e: any) {
+    ElMessage.error(typeof e === 'string' ? e : (e?.message ?? 'Unknown error'))
+  } finally {
+    retrying.value = false
+  }
+}
+
 onMounted(fetchHistory)
 </script>
 
 <template>
   <div class="history-view">
-    <h1>{{ $t('history.title') }}</h1>
+    <div class="page-header">
+      <h1>{{ $t('history.title') }}</h1>
+      <div v-if="entries.length > 0" class="export-actions">
+        <el-button size="small" :loading="exporting" @click="handleExportCsv">
+          {{ $t('history.export_csv') }}
+        </el-button>
+        <el-button size="small" :loading="exporting" @click="handleExportJson">
+          {{ $t('history.export_json') }}
+        </el-button>
+      </div>
+    </div>
 
     <div v-if="loading" class="loading-state">
       <el-skeleton :rows="5" animated />
@@ -72,6 +141,9 @@ onMounted(fetchHistory)
           <div class="history-card-footer">
             <span class="time-label">{{ $t('history.time') }}:</span>
             <span class="time-value">{{ entry.last_backed_up_at ?? '--' }}</span>
+            <el-button size="small" class="retry-btn" @click="showFailedFiles(entry)">
+              {{ $t('history.retry_failed') }}
+            </el-button>
           </div>
         </el-card>
       </div>
@@ -80,6 +152,37 @@ onMounted(fetchHistory)
     <div v-else class="empty-state">
       <el-empty :description="$t('common.no_data')" />
     </div>
+
+    <el-dialog v-model="failedDialogVisible" :title="$t('history.retry_failed')" width="600px">
+      <div v-if="currentFailedFiles.length === 0" class="no-failed">
+        <el-empty :description="$t('common.no_data')" />
+      </div>
+      <el-table v-else :data="currentFailedFiles" size="small" max-height="400">
+        <el-table-column
+          prop="relative_path"
+          :label="$t('history.source')"
+          min-width="200"
+          show-overflow-tooltip
+        />
+        <el-table-column prop="file_size" label="Size" width="100">
+          <template #default="{ row }: { row: FailedFile }">
+            {{ formatBytes(row.file_size) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="error" label="Error" min-width="200" show-overflow-tooltip />
+      </el-table>
+      <template #footer>
+        <el-button @click="failedDialogVisible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button
+          type="primary"
+          :loading="retrying"
+          :disabled="currentFailedFiles.length === 0"
+          @click="handleRetry"
+        >
+          {{ $t('common.confirm') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -132,12 +235,35 @@ onMounted(fetchHistory)
 }
 
 .history-card-footer {
+  display: flex;
   margin-top: 12px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+  align-items: center;
+  gap: 8px;
 }
 
 .time-label {
   margin-right: 4px;
+}
+
+.retry-btn {
+  margin-left: auto;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.export-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.no-failed {
+  padding: 24px 0;
 }
 </style>

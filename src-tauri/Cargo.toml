@@ -30,5 +30,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+sha2 = "0.10"
 dirs = "5"
 trash = "3"
+libc = "0.2"

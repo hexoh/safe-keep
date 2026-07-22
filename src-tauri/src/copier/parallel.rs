@@ -8,7 +8,7 @@ use std::thread;
 
 use super::conflict::{resolve_dest_path, ConflictStrategy};
 use super::progress::BackupProgressEmitter;
-use super::{BackupFile, BackupResult};
+use super::{BackupFile, BackupResult, FailedFile};
 
 const COPY_BUF_SIZE: usize = 64 * 1024; // 64KB buffer
 
@@ -41,6 +41,7 @@ impl FileCopier {
     let copied_bytes = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let failed_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let errors = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let failed_files = Arc::new(std::sync::Mutex::new(Vec::new()));
 
     let (tx, rx) = mpsc::channel::<(u64, u64, String, f64)>();
 
@@ -79,10 +80,10 @@ impl FileCopier {
       let copied_bytes = copied_bytes.clone();
       let failed_count = failed_count.clone();
       let errors = errors.clone();
+      let failed_files = failed_files.clone();
       let tx = tx.clone();
       let file_index = file_index.clone();
       let work_done = work_done.clone();
-
 
       let handle = thread::spawn(move || {
         loop {
@@ -115,6 +116,12 @@ impl FileCopier {
             if let Err(e) = fs::create_dir_all(parent) {
               let msg = format!("Failed to create directory {}: {}", parent.display(), e);
               errors.lock().unwrap().push(msg);
+              failed_files.lock().unwrap().push(FailedFile {
+                source_path: file.source_path.clone(),
+                relative_path: file.relative_path.clone(),
+                file_size: file.file_size,
+                error: e.to_string(),
+              });
               failed_count.fetch_add(1, Ordering::SeqCst);
               let _ = tx.send((0, 0, String::new(), 0.0));
               continue;
@@ -152,6 +159,12 @@ impl FileCopier {
             Err(e) => {
               let msg = format!("Failed to copy {}: {}", src.display(), e);
               errors.lock().unwrap().push(msg);
+              failed_files.lock().unwrap().push(FailedFile {
+                source_path: file.source_path.clone(),
+                relative_path: file.relative_path.clone(),
+                file_size: file.file_size,
+                error: e.to_string(),
+              });
               failed_count.fetch_add(1, Ordering::SeqCst);
               let _ = tx.send((0, 0, String::new(), 0.0));
             }
@@ -182,6 +195,7 @@ impl FileCopier {
     };
 
     let error_list = errors.lock().unwrap().clone();
+    let failed_list = failed_files.lock().unwrap().clone();
 
     Ok(BackupResult {
       total_files,
@@ -192,6 +206,7 @@ impl FileCopier {
       duration_secs: duration,
       avg_speed_mbps: avg_speed,
       errors: error_list,
+      failed_files: failed_list,
     })
   }
 }

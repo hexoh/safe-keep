@@ -15,6 +15,13 @@ export interface StartBackupOptions {
   concurrency?: number
 }
 
+export interface FailedFile {
+  source_path: string
+  relative_path: string
+  file_size: number
+  error: string
+}
+
 export interface BackupResult {
   total_files: number
   succeeded: number
@@ -24,6 +31,7 @@ export interface BackupResult {
   duration_secs: number
   avg_speed_mbps: number
   errors: string[]
+  failed_files: FailedFile[]
 }
 
 export async function startBackup(options: StartBackupOptions): Promise<BackupResult> {
@@ -40,6 +48,22 @@ export async function resumeBackup(): Promise<void> {
 
 export async function cancelBackup(): Promise<void> {
   return invoke<void>('cancel_backup')
+}
+
+export async function getFailedFiles(sourceRoot: string): Promise<FailedFile[]> {
+  return invoke<FailedFile[]>('get_failed_files', { sourceRoot })
+}
+
+export interface RetryBackupOptions {
+  sourceRoot: string
+  destPath: string
+  files: FailedFile[]
+  conflictStrategy?: string
+  concurrency?: number
+}
+
+export async function retryFailedBackup(options: RetryBackupOptions): Promise<BackupResult> {
+  return invoke<BackupResult>('retry_failed_backup', { ...options })
 }
 
 export function onBackupProgress(
