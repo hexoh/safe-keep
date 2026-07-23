@@ -62,6 +62,7 @@ export function createVitePluginConfig(env: Record<string, string>): PluginOptio
 
     // 配置按需自动加载组件
     Components({
+      dirs: ['src/components'],
       resolvers: [
         // 自动注册图标组件
         IconsResolver({

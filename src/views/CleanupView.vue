@@ -1,262 +1,450 @@
 <script setup lang="ts">
-import { useCleanup } from '@/composables/useCleanup'
-import { getSourceRoots } from '@/api/cleanup'
-import { formatBytes, formatDate } from '@/utils/format'
-import type { CleanupFilter, CleanupFile } from '@/types/cleanup'
+const ran = ref(false)
+const confirm = ref(false)
+const sel = ref(new Set([1, 2, 4]))
+const age = ref('90')
+const minSz = ref('100')
 
-const { loading, dryRunResult, cleanupResult, progress, error, dryRun, execute, cancel } =
-  useCleanup()
-
-const sourceRoots = ref<string[]>([])
-const selectedSource = ref('')
-const beforeDays = ref<number>(30)
-const fileType = ref<'all' | 'image' | 'video'>('all')
-const minSize = ref<number>(0)
-const maxSize = ref<number>(0)
-const permanent = ref(false)
-const step = ref<'filter' | 'preview' | 'executing' | 'result'>('filter')
-const selectedFiles = ref<CleanupFile[]>([])
-const selectAll = ref(true)
-
-onMounted(async () => {
-  try {
-    sourceRoots.value = await getSourceRoots()
-  } catch {}
-})
-
-async function runDryRun() {
-  if (!selectedSource.value) return
-
-  const filter: CleanupFilter = {
-    source_root: selectedSource.value,
-    before_days: beforeDays.value > 0 ? beforeDays.value : undefined,
-    is_image: fileType.value === 'all' ? undefined : fileType.value === 'image',
-    min_size: minSize.value > 0 ? minSize.value : undefined,
-    max_size: maxSize.value > 0 ? maxSize.value : undefined
+const CLEANUP = [
+  {
+    id: 1,
+    name: 'VID_20231015_143221.mp4',
+    path: '/Users/zhao/Pictures/Backup/2023/10',
+    size: '512.0 MB',
+    age: '163 days'
+  },
+  {
+    id: 2,
+    name: 'VID_20231102_091135.mov',
+    path: '/Users/zhao/Pictures/Backup/2023/11',
+    size: '1.2 GB',
+    age: '145 days'
+  },
+  {
+    id: 3,
+    name: 'IMG_20231201_175423.jpg',
+    path: '/Users/zhao/Pictures/Backup/2023/12',
+    size: '3.8 MB',
+    age: '105 days'
+  },
+  {
+    id: 4,
+    name: 'VID_20231205_220018.mp4',
+    path: '/Users/zhao/Pictures/Backup/2023/12',
+    size: '347.2 MB',
+    age: '101 days'
+  },
+  {
+    id: 5,
+    name: 'IMG_20231220_090812.png',
+    path: '/Users/zhao/Pictures/Backup/2023/12',
+    size: '8.1 MB',
+    age: '86 days'
   }
+]
 
-  await dryRun(filter)
-  if (dryRunResult.value) {
-    selectedFiles.value = [...dryRunResult.value.files]
-    step.value = 'preview'
-  }
+function toggle(id: number) {
+  const n = new Set(sel.value)
+  if (n.has(id)) n.delete(id)
+  else n.add(id)
+  sel.value = n
 }
 
-function toggleSelectAll() {
-  if (!dryRunResult.value) return
-  selectAll.value = !selectAll.value
-  selectedFiles.value = selectAll.value ? [...dryRunResult.value.files] : []
+function toggleAll(e: Event) {
+  const checked = (e.target as HTMLInputElement).checked
+  sel.value = checked ? new Set(CLEANUP.map((f) => f.id)) : new Set()
 }
-
-async function confirmCleanup() {
-  if (selectedFiles.value.length === 0) return
-  step.value = 'executing'
-  await execute(selectedFiles.value, permanent.value)
-  step.value = 'result'
-}
-
-function resetForm() {
-  step.value = 'filter'
-  dryRunResult.value = null
-  cleanupResult.value = null
-  error.value = null
-}
-
-const totalFreed = computed(() => {
-  if (!dryRunResult.value) return '0 B'
-  return formatBytes(dryRunResult.value.total_size)
-})
-
-const selectedFreed = computed(() => {
-  const bytes = selectedFiles.value.reduce((acc, f) => acc + f.file_size, 0)
-  return formatBytes(bytes)
-})
 </script>
 
 <template>
   <div class="cleanup-view">
-    <h1>{{ $t('cleanup.title') }}</h1>
+    <div class="page-header">
+      <div class="header-left">
+        <h1>Safety Cleanup</h1>
+        <p>Remove source files only after confirming they are safely backed up.</p>
+      </div>
+      <div class="warning-badge">
+        <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+          <path
+            fillRule="evenodd"
+            d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+            clipRule="evenodd"
+          />
+        </svg>
+        Destructive — review carefully
+      </div>
+    </div>
 
-    <!-- Step 1: Filter Conditions -->
-    <template v-if="step === 'filter'">
-      <el-card shadow="never" class="filter-card">
-        <template #header>{{ $t('cleanup.filter_condition') }}</template>
-
-        <el-form label-width="120px">
-          <el-form-item :label="$t('cleanup.source')">
-            <el-select v-model="selectedSource" style="width: 100%">
-              <el-option v-for="root in sourceRoots" :key="root" :label="root" :value="root" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item :label="$t('cleanup.time_range')">
-            <el-radio-group v-model="beforeDays">
-              <el-radio-button :value="7">7 {{ $t('common.days') }}</el-radio-button>
-              <el-radio-button :value="30">30 {{ $t('common.days') }}</el-radio-button>
-              <el-radio-button :value="90">90 {{ $t('common.days') }}</el-radio-button>
-              <el-radio-button :value="180">180 {{ $t('common.days') }}</el-radio-button>
-              <el-radio-button :value="365">365 {{ $t('common.days') }}</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-
-          <el-form-item :label="$t('cleanup.file_type')">
-            <el-radio-group v-model="fileType">
-              <el-radio-button value="all">{{ $t('common.all') }}</el-radio-button>
-              <el-radio-button value="image">{{ $t('common.images') }}</el-radio-button>
-              <el-radio-button value="video">{{ $t('common.videos') }}</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-
-          <el-form-item :label="$t('cleanup.file_size')">
-            <div class="size-range">
-              <el-input-number v-model="minSize" :min="0" :step="1024" size="small" />
-              <span class="size-sep">~</span>
-              <el-input-number v-model="maxSize" :min="0" :step="1024" size="small" />
-              <span class="size-unit">bytes</span>
-            </div>
-          </el-form-item>
-
-          <el-form-item :label="$t('cleanup.delete_strategy')">
-            <el-switch
-              v-model="permanent"
-              :active-text="$t('cleanup.permanent_delete')"
-              :inactive-text="$t('cleanup.move_to_trash')"
-            />
-          </el-form-item>
-        </el-form>
-
-        <div class="form-actions">
-          <el-button
-            type="primary"
-            :loading="loading"
-            :disabled="!selectedSource"
-            @click="runDryRun"
-          >
-            {{ $t('cleanup.dry_run') }}
-          </el-button>
+    <DesignCard padding="18px">
+      <div class="filter-row">
+        <div class="filter-field">
+          <DesignLabel text="Older than (days)" />
+          <input v-model="age" placeholder="90" class="filter-input" />
         </div>
-      </el-card>
-
-      <div v-if="error" class="error-msg">
-        <el-alert :title="error" type="error" show-icon :closable="false" />
-      </div>
-    </template>
-
-    <!-- Step 2: Dry Run Preview -->
-    <template v-else-if="step === 'preview' && dryRunResult">
-      <div class="dry-run-summary">
-        <el-alert type="info" show-icon :closable="false">
-          <template #title>
-            {{ $t('cleanup.total_files') }}: {{ dryRunResult.total_files }} |
-            {{ $t('cleanup.total_release') }}: {{ totalFreed }} |
-            {{ $t('cleanup.selected_count') }}: {{ selectedFiles.length }} ({{ selectedFreed }})
-          </template>
-        </el-alert>
-      </div>
-
-      <el-card shadow="never" class="table-card">
-        <template #header>
-          <div class="table-header">
-            <el-checkbox :model-value="selectAll" @change="toggleSelectAll">
-              {{ $t('common.select_all') }}
-            </el-checkbox>
-          </div>
-        </template>
-
-        <el-table
-          :data="dryRunResult.files"
-          style="width: 100%"
-          size="small"
-          @selection-change="
-            (rows: CleanupFile[]) => {
-              selectedFiles = rows
-              selectAll = rows.length === dryRunResult!.files.length
-            }
+        <div class="filter-field">
+          <DesignLabel text="Min size (MB)" />
+          <input v-model="minSz" placeholder="100" class="filter-input" />
+        </div>
+        <div class="filter-field">
+          <DesignLabel text="Source scope" />
+          <input value="/Users/zhao/Pictures" class="filter-input" />
+        </div>
+        <button
+          class="sim-btn"
+          @click="
+            ran = true
+            confirm = false
           "
+          >Run Simulation</button
         >
-          <el-table-column type="selection" width="40" />
-          <el-table-column
-            prop="file_name"
-            :label="$t('preview.file_name')"
-            min-width="200"
-            show-overflow-tooltip
-          />
-          <el-table-column :label="$t('preview.size')" width="100" sortable>
-            <template #default="{ row }: { row: CleanupFile }">
-              {{ formatBytes(row.file_size) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('preview.modified_at')" width="120" sortable>
-            <template #default="{ row }: { row: CleanupFile }">
-              {{ formatDate(row.modified_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('cleanup.backed_up_at')" width="180" sortable>
-            <template #default="{ row }: { row: CleanupFile }">
-              {{ row.backed_up_at ?? '--' }}
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
+      </div>
+    </DesignCard>
 
-      <div class="form-actions">
-        <el-button @click="step = 'filter'">{{ $t('common.back') }}</el-button>
-        <el-button type="danger" :disabled="selectedFiles.length === 0" @click="confirmCleanup">
-          {{ $t('cleanup.execute') }} ({{ selectedFiles.length }})
-        </el-button>
+    <template v-if="ran">
+      <div class="results-header">
+        <div class="results-title">
+          <DesignLabel text="Simulation Results" />
+          <span class="dry-run-badge">DRY RUN</span>
+        </div>
+        <span class="results-summary">
+          {{ sel.size }} files ·
+          <span class="text-new mono" style="font-weight: 600">2.07 GB to free</span>
+        </span>
+      </div>
+
+      <DesignCard style="overflow: hidden">
+        <table class="design-table">
+          <thead>
+            <tr>
+              <th class="th-check">
+                <input type="checkbox" :checked="sel.size === CLEANUP.length" @change="toggleAll" />
+              </th>
+              <th>File</th>
+              <th>Location</th>
+              <th class="th-size">Size</th>
+              <th class="th-age">Age</th>
+              <th class="th-backup">Backup</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="f in CLEANUP"
+              :key="f.id"
+              :class="['table-row', { selected: sel.has(f.id) }]"
+              @click="toggle(f.id)"
+            >
+              <td class="td-check">
+                <input type="checkbox" :checked="sel.has(f.id)" @click.stop="toggle(f.id)" />
+              </td>
+              <td
+                ><span class="mono-sm">{{ f.name }}</span></td
+              >
+              <td
+                ><span class="mono-sm muted mono-path">{{ f.path }}</span></td
+              >
+              <td class="mono muted">{{ f.size }}</td>
+              <td class="mono muted">{{ f.age }}</td>
+              <td>
+                <span class="verified-badge">
+                  <svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor">
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  Verified
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </DesignCard>
+
+      <div class="action-row">
+        <template v-if="confirm">
+          <span class="confirm-warning">⚠ Permanently delete {{ sel.size }} source files?</span>
+          <button class="btn-secondary-sm" @click="confirm = false">Cancel</button>
+          <button class="btn-danger">Delete Now</button>
+        </template>
+        <button
+          v-else
+          class="btn-danger"
+          :disabled="sel.size === 0"
+          @click="confirm = true"
+          :class="{ disabled: sel.size === 0 }"
+        >
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor">
+            <path
+              fillRule="evenodd"
+              d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v3a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v3a1 1 0 102 0V8a1 1 0 00-1-1z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Delete {{ sel.size }} Files
+        </button>
       </div>
     </template>
 
-    <!-- Step 3: Executing -->
-    <template v-else-if="step === 'executing'">
-      <el-card shadow="never">
-        <div class="executing-state">
-          <el-progress
-            :percentage="
-              progress ? Math.round((progress.processed / progress.total_files) * 100) : 0
-            "
-            :stroke-width="20"
-          />
-          <p v-if="progress" class="executing-current">
-            {{ $t('common.processing') }}: {{ progress.current_file }}
-          </p>
-          <p class="executing-stats">
-            {{ $t('cleanup.result_success') }}: {{ progress?.succeeded ?? 0 }} |
-            {{ $t('cleanup.result_failed') }}: {{ progress?.failed ?? 0 }}
-          </p>
-          <el-button type="danger" @click="cancel">
-            {{ $t('backup.cancel') }}
-          </el-button>
-        </div>
-      </el-card>
-    </template>
-
-    <!-- Step 4: Result -->
-    <template v-else-if="step === 'result' && cleanupResult">
-      <el-result
-        :status="cleanupResult.failed > 0 ? 'warning' : 'success'"
-        :title="$t('cleanup.completed')"
+    <div v-else class="empty-state">
+      <span class="empty-icon">🧹</span>
+      <span class="empty-text"
+        >Configure filters and run a simulation to preview cleanup candidates</span
       >
-        <template #sub-title>
-          <div class="result-stats">
-            <p>{{ $t('cleanup.result_success') }}: {{ cleanupResult.succeeded }}</p>
-            <p v-if="cleanupResult.failed > 0">
-              {{ $t('cleanup.result_failed') }}: {{ cleanupResult.failed }}
-            </p>
-            <p>{{ $t('cleanup.result_released') }}: {{ formatBytes(cleanupResult.freed_size) }}</p>
-          </div>
-        </template>
-        <template #extra>
-          <el-button @click="resetForm">{{ $t('common.back') }}</el-button>
-        </template>
-      </el-result>
-
-      <el-card v-if="cleanupResult.errors.length > 0" shadow="never" class="error-card">
-        <template #header>
-          <span style="color: var(--el-color-danger)">{{ $t('common.error') }}</span>
-        </template>
-        <p v-for="(err, i) in cleanupResult.errors" :key="i" class="error-line">{{ err }}</p>
-      </el-card>
-    </template>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.cleanup-view {
+  display: flex;
+  height: 100%;
+  padding: 26px 30px;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.header-left {
+  flex: 1;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.page-header p {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--text-sec);
+}
+
+.warning-badge {
+  display: flex;
+  padding: 7px 13px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--modified);
+  background: var(--modified-bg);
+  border: 1px solid rgb(245 158 11 / 35%);
+  border-radius: 7px;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.filter-input {
+  padding: 8px 11px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.sim-btn {
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+  background: var(--accent-dim);
+  border: 1px solid rgb(79 127 255 / 40%);
+  border-radius: 6px;
+}
+
+.results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.results-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.dry-run-badge {
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: 4px;
+}
+
+.results-summary {
+  font-size: 12px;
+  color: var(--text-sec);
+}
+
+.text-new {
+  color: var(--new);
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.design-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.design-table th {
+  padding: 9px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--text-sec);
+  text-align: left;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+
+.design-table td {
+  padding: 9px 14px;
+  font-size: 12px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.th-check,
+.td-check {
+  width: 42px;
+}
+
+.th-size {
+  width: 100px;
+}
+
+.th-age {
+  width: 100px;
+}
+
+.th-backup {
+  width: 110px;
+}
+
+.table-row {
+  cursor: pointer;
+}
+
+.table-row.selected {
+  background: var(--accent-dim);
+}
+
+.table-row:hover {
+  background: var(--card-hover);
+}
+
+.mono-sm {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.mono-path {
+  font-size: 11px;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.verified-badge {
+  display: flex;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--new);
+  align-items: center;
+  gap: 4px;
+}
+
+.action-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+.confirm-warning {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--modified);
+}
+
+.btn-secondary-sm {
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--text-sec);
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.btn-danger {
+  display: flex;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--failed);
+  cursor: pointer;
+  background: var(--failed-bg);
+  border: 1px solid var(--failed);
+  border-radius: 7px;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-danger.disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 0.4;
+}
+
+.empty-icon {
+  font-size: 36px;
+}
+
+.empty-text {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+</style>

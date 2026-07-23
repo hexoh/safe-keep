@@ -122,7 +122,9 @@
   "device.unknown": "Unknown Device",
 
   "status.new": "New",
+  "status.backed": "Backed Up",
   "status.backed_up": "Backed Up",
+  "status.modified": "Modified",
   "status.changed": "Changed",
   "status.deleted": "Deleted",
   "status.failed": "Failed",
@@ -130,6 +132,12 @@
   "status.backing_up": "Backing Up",
   "status.verified": "Verified",
   "status.restored": "Restored",
+  "status.success": "Success",
+  "status.partial": "Partial",
+  "status.running": "Running",
+  "status.paused": "Paused",
+  "status.done": "Complete",
+  "status.error": "Error",
 
   "common.cancel": "Cancel",
   "common.confirm": "Confirm",

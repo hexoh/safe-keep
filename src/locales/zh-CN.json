@@ -122,7 +122,9 @@
   "device.unknown": "未知设备",
 
   "status.new": "新增",
+  "status.backed": "已备份",
   "status.backed_up": "已备份",
+  "status.modified": "已修改",
   "status.changed": "已变更",
   "status.deleted": "已删除",
   "status.failed": "失败",
@@ -130,6 +132,12 @@
   "status.backing_up": "备份中",
   "status.verified": "已验证",
   "status.restored": "已还原",
+  "status.success": "成功",
+  "status.partial": "部分成功",
+  "status.running": "运行中",
+  "status.paused": "已暂停",
+  "status.done": "已完成",
+  "status.error": "错误",
 
   "common.cancel": "取消",
   "common.confirm": "确认",

@@ -1,19 +1,35 @@
 <script setup lang="ts">
 defineProps<{
-  percentage: number
-  label?: string
-  showText?: boolean
+  value: number
+  color?: string
+  height?: number
 }>()
 </script>
 
 <template>
-  <div class="progress-bar-wrapper">
-    <div v-if="label" class="progress-label">{{ label }}</div>
-    <el-progress
-      :percentage="Math.round(percentage)"
-      :show-text="showText !== false"
-      :stroke-width="20"
-      :format="() => `${Math.round(percentage)}%`"
+  <div
+    class="progress-track"
+    :style="{ height: `${height ?? 6}px`, borderRadius: `${height ?? 6}px` }"
+  >
+    <div
+      class="progress-fill"
+      :style="{
+        width: `${Math.min(100, Math.max(0, value))}%`,
+        background: color ?? 'var(--accent)',
+        borderRadius: `${height ?? 6}px`
+      }"
     />
   </div>
 </template>
+
+<style scoped>
+.progress-track {
+  overflow: hidden;
+  background: var(--border);
+}
+
+.progress-fill {
+  height: 100%;
+  transition: width 0.35s ease;
+}
+</style>
