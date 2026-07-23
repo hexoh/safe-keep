@@ -24,6 +24,7 @@ import LayoutSidebar from './layout-sidebar.vue'
   min-width: 0;
   overflow: hidden;
   flex: 1;
+  background: var(--surface);
   flex-direction: column;
 }
 </style>

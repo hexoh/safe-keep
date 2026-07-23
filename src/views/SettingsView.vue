@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { useTheme } from '@/composables/useTheme'
+import { useLocale } from '@/composables/useLocale'
+
+const { theme } = useTheme()
+const { language } = useLocale()
+
 const threads = ref(4)
 const dupPol = ref<'skip' | 'overwrite' | 'rename'>('skip')
 const delMode = ref<'recycle' | 'permanent'>('recycle')
-const theme = ref<'light' | 'dark' | 'system'>('dark')
-const lang = ref<'en' | 'zh'>('en')
 const autoBack = ref(false)
 const notifs = ref(true)
 
@@ -14,8 +18,9 @@ const themeOptions = [
 ]
 
 const langOptions = [
+  { value: 'system' as const, label: 'System / 系统' },
   { value: 'en' as const, label: 'English' },
-  { value: 'zh' as const, label: '中文' }
+  { value: 'zh-CN' as const, label: '中文' }
 ]
 
 const conflictOptions = [
@@ -159,8 +164,8 @@ const deleteOptions = [
           </div>
           <DesignRadioGroup
             :options="langOptions"
-            :model-value="lang"
-            @update:model-value="lang = $event"
+            :model-value="language"
+            @update:model-value="language = $event"
           />
         </div>
       </div>

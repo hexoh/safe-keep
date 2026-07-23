@@ -8,14 +8,14 @@
 
 :root {
   --bg: #0c0f17;
-  --surface: #111520;
-  --card: #171c2c;
-  --card-hover: #1d2336;
+  --surface: #1a2234;
+  --card: #1e263c;
+  --card-hover: #252e46;
   --border: #232a3e;
   --border-subtle: #181e2e;
   --text: #dce5f5;
-  --text-sec: #5e6e90;
-  --text-muted: #384060;
+  --text-sec: #8899b8;
+  --text-muted: #607da0;
   --accent: #4f7fff;
   --accent-dim: rgb(79 127 255 / 12%);
   --accent-hover: #6b96ff;
@@ -56,8 +56,8 @@
   --border: #dcdfe6;
   --border-subtle: #ebeef5;
   --text: #303133;
-  --text-sec: #909399;
-  --text-muted: #c0c4cc;
+  --text-sec: #6c6e80;
+  --text-muted: #878b9a;
   --accent: #4f7fff;
   --accent-dim: rgb(79 127 255 / 8%);
   --accent-hover: #3a6fe0;

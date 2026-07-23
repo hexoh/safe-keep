@@ -116,6 +116,10 @@
   "settings.theme_dark": "Dark",
   "settings.theme_system": "System",
 
+  "storage.backup_drive": "Backup Drive",
+  "storage.free_space": "{size} free",
+  "storage.used_space": "{used} / {total} GB used",
+
   "device.mtp": "MTP Device",
   "device.removable": "Removable Disk",
   "device.local": "Local Disk",

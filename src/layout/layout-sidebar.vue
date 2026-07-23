@@ -45,7 +45,7 @@ const route = useRoute()
   display: flex;
   width: 100%;
   padding: 7px 9px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--text-sec);
   text-align: left;

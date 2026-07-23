@@ -116,6 +116,10 @@
   "settings.theme_dark": "深色",
   "settings.theme_system": "跟随系统",
 
+  "storage.backup_drive": "备份驱动器",
+  "storage.free_space": "{size} 可用",
+  "storage.used_space": "{used} / {total} GB 已用",
+
   "device.mtp": "MTP 设备",
   "device.removable": "可移动磁盘",
   "device.local": "本地磁盘",

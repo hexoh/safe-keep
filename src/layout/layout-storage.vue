@@ -1,13 +1,13 @@
 <template>
   <div class="layout-storage">
     <div class="storage-header">
-      <span class="storage-label">Backup Drive</span>
-      <span class="storage-free">412 GB free</span>
+      <span class="storage-label">{{ $t('storage.backup_drive') }}</span>
+      <span class="storage-free">{{ $t('storage.free_space', { size: '412 GB' }) }}</span>
     </div>
     <div class="storage-bar">
       <div class="storage-bar-fill" style="width: 41%" />
     </div>
-    <div class="storage-footer">339 / 580 GB used</div>
+    <div class="storage-footer">{{ $t('storage.used_space', { used: '339', total: '580' }) }}</div>
   </div>
 </template>
 

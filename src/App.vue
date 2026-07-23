@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { useUpdater } from '@/composables/useUpdater'
+import { useTheme } from '@/composables/useTheme'
+import { useLocale } from '@/composables/useLocale'
 import LayoutDefault from '@/layout/layout-default.vue'
 
 const { checking, updateAvailable, updateVersion, installUpdate } = useUpdater()
+useTheme()
+useLocale()
 </script>
 
 <template>
