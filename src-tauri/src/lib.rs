@@ -22,6 +22,7 @@ use commands::scan::{cancel_scan, start_scan, ScannerState};
 use commands::settings::{get_settings, save_settings};
 use database::Database;
 use tauri::Manager;
+use tauri_plugin_updater; // required for plugin registration
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,6 +34,7 @@ pub fn run() {
     .manage(CleanupState::new())
     .manage(RestoreState::new())
     .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

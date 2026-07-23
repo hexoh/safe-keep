@@ -35,3 +35,5 @@ coverage/
 # Auto-generated types (by unplugin)
 types/components.d.ts
 types/auto-imports.d.ts
+
+.eslintcache

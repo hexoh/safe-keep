@@ -3,17 +3,12 @@ import { useRestore } from '@/composables/useRestore'
 import { formatBytes, formatDuration } from '@/utils/format'
 import type { RestoreFile } from '@/types/restore'
 
-const { files, loading, running, progress, result, error, fetchFiles, start, cancel } = useRestore()
+const { files, loading, progress, result, error, fetchFiles, start, cancel } = useRestore()
 
 const step = ref<'select' | 'executing' | 'result'>('select')
 const selectedFiles = ref<RestoreFile[]>([])
 const restoreTarget = ref('')
 const conflictStrategy = ref<'overwrite' | 'skip' | 'keep_both'>('overwrite')
-
-const currentSourceRoot = computed(() => {
-  if (files.value.length === 0) return ''
-  return files.value[0].source_root
-})
 
 const totalSelectedSize = computed(() => {
   const bytes = selectedFiles.value.reduce((acc, f) => acc + f.file_size, 0)

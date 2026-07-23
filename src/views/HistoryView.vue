@@ -2,7 +2,7 @@
 import { getBackupHistory, getFailedFiles, retryFailedBackup } from '@/api/backup'
 import { exportCsv, exportJson } from '@/api/export'
 import { formatBytes } from '@/utils/format'
-import type { BackupHistoryEntry, FailedFile, BackupResult } from '@/types/backup'
+import type { BackupHistoryEntry, FailedFile } from '@/types/backup'
 
 const entries = ref<BackupHistoryEntry[]>([])
 const loading = ref(false)

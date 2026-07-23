@@ -149,5 +149,9 @@
   "common.images": "Images",
   "common.videos": "Videos",
   "common.retry": "Retry",
-  "common.processing": "Processing"
+  "common.processing": "Processing",
+
+  "updater.available": "New version {version} available",
+  "updater.install": "Update Now",
+  "updater.checking": "Checking for updates..."
 }

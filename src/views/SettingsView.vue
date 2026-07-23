@@ -10,15 +10,17 @@ const { settings, load, save } = useSettings()
 
 onMounted(load)
 
-function setTheme(mode: ThemeMode) {
-  theme.value = mode
-  settings.value.theme = mode
+function setTheme(mode: unknown) {
+  const m = mode as ThemeMode
+  theme.value = m
+  settings.value.theme = m
   save()
 }
 
-function setLanguage(lang: string) {
-  locale.value = lang
-  settings.value.language = lang
+function setLanguage(lang: unknown) {
+  const l = lang as string
+  locale.value = l
+  settings.value.language = l
   save()
 }
 

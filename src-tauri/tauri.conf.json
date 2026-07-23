@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "safe-keep",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.safekeep.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -33,8 +33,33 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "android": {
-      "debugApplicationIdSuffix": ".debug"
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "exceptionDomain": "",
+      "hardenedRuntime": true
+    },
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "YOUR_UPDATER_SIGNATURE_PUBKEY_HERE",
+      "endpoints": ["https://github.com/hexoh/safe-keep/releases/latest/download/update.json"],
+      "dialog": true,
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

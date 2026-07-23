@@ -45,3 +45,22 @@ export interface BackupProgress {
   speed_mbps: number
   remaining_secs: number | null
 }
+
+export interface BackupResult {
+  total_files: number
+  succeeded: number
+  failed: number
+  total_bytes: number
+  copied_bytes: number
+  duration_secs: number
+  avg_speed_mbps: number
+  errors: string[]
+  failed_files?: FailedFile[]
+}
+
+export interface FailedFile {
+  source_path: string
+  relative_path: string
+  file_size: number
+  error: string
+}
