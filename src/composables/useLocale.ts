@@ -8,7 +8,7 @@ let initialized = false
 
 function applyLanguage(lang: Language) {
   const locale = lang === 'system' ? (navigator.language.startsWith('zh') ? 'zh-CN' : 'en') : lang
-  i18n.global.locale = locale
+  i18n.global.locale = locale as any
 }
 
 function onLanguageChange() {
