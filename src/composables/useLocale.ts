@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue'
-import { i18n } from '@/locales'
+import { i18n, resolveSystemLocale } from '@/locales'
 
 export type Language = 'system' | 'zh-CN' | 'en'
 
@@ -7,8 +7,8 @@ const language = ref<Language>('system')
 let initialized = false
 
 function applyLanguage(lang: Language) {
-  const locale = lang === 'system' ? (navigator.language.startsWith('zh') ? 'zh-CN' : 'en') : lang
-  i18n.global.locale = locale as any
+  const locale = lang === 'system' ? resolveSystemLocale() : lang
+  i18n.global.locale.value = locale as any
 }
 
 function onLanguageChange() {
