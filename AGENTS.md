@@ -35,10 +35,11 @@ Pre-commit hook runs: `ts:check` → `lint:lint-staged`. Commits must pass conve
 
 ## Coding conventions
 
-- **Filenames**: `kebab-case` (two-or-more-words.ts, never `twoOrMoreWords.ts` or `two_or_more.ts`)
+- **Vue SFC filenames**: `PascalCase` (e.g. `HomeView.vue`, `LayoutSidebar.vue`; never `home-view.vue` or `Home-view.vue`)
+- **Other filenames** (ts/util/helper): `kebab-case` (two-or-more-words.ts, never `twoOrMoreWords.ts` or `two_or_more.ts`)
 - **Variables/functions**: `camelCase` (never snake_case or PascalCase for variables/functions)
 - **Reusability**: extract shared logic into composables, utilities, or helpers; avoid code duplication
-- **Components**: PascalCase (Vue convention), filenames still `kebab-case`
+- **Components**: PascalCase (Vue convention)
 
 ## Rust backend (src-tauri)
 

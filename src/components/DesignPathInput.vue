@@ -25,7 +25,7 @@ const emit = defineEmits<{
         <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
           <path d="M2 6a2 2 0 012-2h4l2 2h4a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>
-        Browse
+        {{ $t('common.browse') }}
       </button>
     </div>
     <span v-if="hint" class="path-hint">{{ hint }}</span>

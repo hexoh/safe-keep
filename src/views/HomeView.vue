@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { IMAGE_FORMATS, VIDEO_FORMATS } from '@/constants/media'
 
 const router = useRouter()
 
@@ -12,11 +13,20 @@ const maxSz = ref('')
 const fmts = reactive({
   jpg: true,
   heic: true,
+  heif: true,
   png: true,
   raw: false,
+  dng: false,
+  webp: true,
+  gif: true,
+  tiff: false,
+  avif: true,
   mp4: true,
   mov: true,
-  mkv: false
+  mkv: false,
+  m4v: true,
+  webm: false,
+  '3gp': false
 })
 
 function toggleFmt(k: keyof typeof fmts) {
@@ -24,9 +34,30 @@ function toggleFmt(k: keyof typeof fmts) {
 }
 
 const devices = [
-  { icon: 'phone', label: 'iPhone 15 Pro', sub: '47.2 GB used', pct: 37, connected: true },
-  { icon: 'sd', label: 'SanDisk 32 GB', sub: '18.1 GB used', pct: 56, connected: true },
-  { icon: 'hdd', label: 'USB Drive', sub: 'Not detected', pct: 0, connected: false }
+  {
+    icon: 'phone',
+    label: 'iPhone 15 Pro',
+    subKey: 'home.used_gb',
+    subArgs: { size: '47.2' },
+    pct: 37,
+    connected: true
+  },
+  {
+    icon: 'sd',
+    label: 'SanDisk 32 GB',
+    subKey: 'home.used_gb',
+    subArgs: { size: '18.1' },
+    pct: 56,
+    connected: true
+  },
+  {
+    icon: 'hdd',
+    label: 'USB Drive',
+    subKey: 'home.not_detected',
+    subArgs: {},
+    pct: 0,
+    connected: false
+  }
 ]
 
 const orgOpts = ['YYYY/MM/DD', 'YYYY/MM', 'Flat']
@@ -39,8 +70,8 @@ function startScan() {
 <template>
   <div class="home-view">
     <div class="page-header">
-      <h1>New Backup</h1>
-      <p>Configure source, destination, and filters — then scan.</p>
+      <h1>{{ $t('home.new_backup') }}</h1>
+      <p>{{ $t('home.configure_hint') }}</p>
     </div>
 
     <div class="config-grid">
@@ -55,7 +86,7 @@ function startScan() {
                 />
               </svg>
             </span>
-            <DesignLabel text="Source Device" />
+            <DesignLabel :text="$t('home.source_device')" />
           </div>
 
           <div class="device-grid">
@@ -102,21 +133,21 @@ function startScan() {
                 </span>
                 {{ d.label }}
               </span>
-              <span class="device-sub">{{ d.sub }}</span>
+              <span class="device-sub">{{ $t(d.subKey, d.subArgs) }}</span>
             </button>
           </div>
 
           <DesignPathInput
-            label="Source Path"
+            :label="$t('home.source_path')"
             :value="srcPath"
-            placeholder="/Volumes/Device/DCIM"
-            hint="1,247 files found · 4.3 GB estimated"
+            :placeholder="$t('home.source_placeholder')"
+            :hint="$t('home.scan_hint', { files: '1,247', size: '4.3 GB' })"
             @update:value="srcPath = $event"
           />
 
           <div class="storage-row">
             <div class="storage-row-header">
-              <span>Device storage</span>
+              <span>{{ $t('home.device_storage') }}</span>
               <span class="mono">47.2 / 128 GB</span>
             </div>
             <ProgressBar :value="37" />
@@ -137,31 +168,33 @@ function startScan() {
                 />
               </svg>
             </span>
-            <DesignLabel text="Destination" />
+            <DesignLabel :text="$t('home.destination')" />
           </div>
 
           <DesignPathInput
-            label="Backup Path"
+            :label="$t('home.backup_path')"
             :value="dstPath"
-            placeholder="/path/to/backup"
+            :placeholder="$t('home.backup_placeholder')"
             @update:value="dstPath = $event"
           />
 
           <div class="storage-row">
             <div class="storage-row-header">
-              <span>Free space</span>
-              <span class="mono text-new" style="font-weight: 600">412.8 GB available</span>
+              <span>{{ $t('home.free_space') }}</span>
+              <span class="mono text-new" style="font-weight: 600">{{
+                $t('home.available_space', { size: '412.8 GB' })
+              }}</span>
             </div>
             <ProgressBar :value="41" :color="'var(--new)'" />
           </div>
 
           <div class="org-section">
-            <DesignLabel text="Organize output by" />
+            <DesignLabel :text="$t('home.organize_by')" />
             <div class="toggle-row">
               <DesignToggle
                 v-for="(o, i) in orgOpts"
                 :key="o"
-                :label="o"
+                :label="o === 'Flat' ? $t('home.org_flat') : o"
                 :on="org === i"
                 @change="org = i"
               />
@@ -183,11 +216,11 @@ function startScan() {
                 clipRule="evenodd"
               />
             </svg>
-            <DesignLabel text="Images" />
+            <DesignLabel :text="$t('home.filter_images')" />
           </div>
           <div class="toggle-row">
             <DesignToggle
-              v-for="f in ['jpg', 'heic', 'png', 'raw'] as const"
+              v-for="f in IMAGE_FORMATS"
               :key="f"
               :label="f.toUpperCase()"
               :on="fmts[f]"
@@ -202,11 +235,11 @@ function startScan() {
                 d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0013 8v4a1 1 0 001.553.894l3-2a1 1 0 000-1.788l-3-2z"
               />
             </svg>
-            <DesignLabel text="Videos" />
+            <DesignLabel :text="$t('home.filter_videos')" />
           </div>
           <div class="toggle-row">
             <DesignToggle
-              v-for="f in ['mp4', 'mov', 'mkv'] as const"
+              v-for="f in VIDEO_FORMATS"
               :key="f"
               :label="f.toUpperCase()"
               :on="fmts[f]"
@@ -215,15 +248,15 @@ function startScan() {
           </div>
         </div>
         <div class="filter-col">
-          <DesignLabel text="File Size (MB)" />
+          <DesignLabel :text="$t('home.file_size_mb')" />
           <div class="size-grid">
             <div>
-              <span class="size-label">Min</span>
+              <span class="size-label">{{ $t('home.filter_min_size') }}</span>
               <input v-model="minSz" placeholder="0" class="size-input" />
             </div>
             <div>
-              <span class="size-label">Max</span>
-              <input v-model="maxSz" placeholder="No limit" class="size-input" />
+              <span class="size-label">{{ $t('home.filter_max_size') }}</span>
+              <input v-model="maxSz" :placeholder="$t('home.no_limit')" class="size-input" />
             </div>
           </div>
         </div>
@@ -231,7 +264,7 @@ function startScan() {
     </DesignCard>
 
     <div class="page-actions">
-      <button class="btn-secondary">Save Preset</button>
+      <button class="btn-secondary">{{ $t('home.save_preset') }}</button>
       <button class="btn-primary" @click="startScan">
         <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor">
           <path
@@ -240,7 +273,7 @@ function startScan() {
             clipRule="evenodd"
           />
         </svg>
-        Start Scan
+        {{ $t('home.start_scan') }}
       </button>
     </div>
   </div>

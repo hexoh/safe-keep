@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useRouter, useRoute } from 'vue-router'
-import LayoutLogo from './layout-logo.vue'
-import LayoutNav from './layout-nav.vue'
-import LayoutStorage from './layout-storage.vue'
+import LayoutLogo from './LayoutLogo.vue'
+import LayoutNav from './LayoutNav.vue'
+import LayoutStorage from './LayoutStorage.vue'
 
 const router = useRouter()
 const route = useRoute()
