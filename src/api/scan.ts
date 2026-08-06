@@ -11,7 +11,12 @@ export async function cancelScan(): Promise<void> {
 }
 
 export async function countFiles(path: string): Promise<{ count: number; bytes: number }> {
-  return invoke<{ count: number; bytes: number }>('count_files', { path })
+  const [count, bytes] = await invoke<[number, number]>('count_files', { path })
+  return { count, bytes }
+}
+
+export function cancelCount(): Promise<void> {
+  return invoke<void>('cancel_count')
 }
 
 export function onScanProgress(callback: (progress: ScanProgress) => void): Promise<() => void> {

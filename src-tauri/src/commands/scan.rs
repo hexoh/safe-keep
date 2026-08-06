@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Emitter, State};
 
@@ -25,11 +26,28 @@ pub struct ScannerState {
   pub scanner: std::sync::Mutex<Option<FileScanner>>,
 }
 
+/// 首页统计任务的可取消标志，切换源路径时用于立即终止上一次遍历
+#[allow(dead_code)]
+pub struct CountState {
+  pub cancel: std::sync::Mutex<Option<Arc<AtomicBool>>>,
+}
+
 /// 统计目录下媒体文件数量与大小（用于首页提示，不执行完整对比）
 ///
 /// 异步 + spawn_blocking，避免在后台遍历大目录时阻塞主线程导致卡死。
+/// 新启动的统计会先取消上一次的遍历（若有），并在循环中检查取消标志。
 #[tauri::command]
-pub async fn count_files(path: String) -> Result<(u64, u64), String> {
+pub async fn count_files(path: String, state: State<'_, CountState>) -> Result<(u64, u64), String> {
+  let flag = Arc::new(AtomicBool::new(false));
+  {
+    let mut guard = state.cancel.lock().map_err(|e| e.to_string())?;
+    if let Some(prev) = guard.as_ref() {
+      prev.store(true, Ordering::Relaxed);
+    }
+    *guard = Some(flag.clone());
+  }
+
+  let flag_scan = flag.clone();
   let task = tauri::async_runtime::spawn_blocking(move || {
     let root = std::path::Path::new(&path);
     if !root.is_dir() {
@@ -42,6 +60,9 @@ pub async fn count_files(path: String) -> Result<(u64, u64), String> {
       .into_iter()
       .filter_map(|e| e.ok())
     {
+      if flag_scan.load(Ordering::Relaxed) {
+        break;
+      }
       if entry.file_type().is_file() {
         let name = entry.file_name().to_string_lossy();
         if name.starts_with("._") || name == ".DS_Store" || name.starts_with('.') {
@@ -58,7 +79,25 @@ pub async fn count_files(path: String) -> Result<(u64, u64), String> {
     (count, bytes)
   });
 
-  task.await.map_err(|e| e.to_string())
+  let res = task.await.map_err(|e| e.to_string())?;
+
+  {
+    let mut guard = state.cancel.lock().map_err(|e| e.to_string())?;
+    if guard.as_ref().is_some_and(|f| Arc::ptr_eq(f, &flag)) {
+      *guard = None;
+    }
+  }
+
+  Ok(res)
+}
+
+#[tauri::command]
+pub fn cancel_count(state: State<'_, CountState>) -> Result<(), String> {
+  let guard = state.cancel.lock().map_err(|e| e.to_string())?;
+  if let Some(flag) = guard.as_ref() {
+    flag.store(true, Ordering::Relaxed);
+  }
+  Ok(())
 }
 
 #[tauri::command]

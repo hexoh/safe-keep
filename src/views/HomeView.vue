@@ -3,12 +3,27 @@ import { useRouter } from 'vue-router'
 import { IMAGE_FORMATS, VIDEO_FORMATS } from '@/constants/media'
 import { useDevice } from '@/composables/useDevice'
 import { formatBytes } from '@/utils/format'
-import { countFiles } from '@/api/scan'
+import { countFiles, cancelCount } from '@/api/scan'
+import { homeDir } from '@tauri-apps/api/path'
+
+const STORAGE_KEY = 'safe-keep.last-src-path'
+
+// 找出路径所属的驱动器根路径（/、/Volumes/xxx 等），用于按驱动器分别记忆
+function driveRootOf(path: string): string {
+  let best = ''
+  for (const v of volumes.value) {
+    if (v.path && path.startsWith(v.path) && v.path.length > best.length) {
+      best = v.path
+    }
+  }
+  return best
+}
 
 const router = useRouter()
 const { devices: volumes, refresh, watchDevices } = useDevice()
 
 onMounted(async () => {
+  initSrcPath()
   try {
     await refresh()
   } catch {
@@ -18,27 +33,81 @@ onMounted(async () => {
 })
 
 const srcPath = ref('')
-const srcStats = ref<{ count: number; bytes: number } | null>(null)
+const srcStats = ref<{ count: number; bytes: number }>({ count: 0, bytes: 0 })
+const counting = ref(false)
+let srcStatsSeq = 0
 let srcStatsTimer: ReturnType<typeof setTimeout> | undefined
 
 async function updateSrcStats() {
   const p = srcPath.value.trim()
+  const seq = ++srcStatsSeq
   if (!p) {
-    srcStats.value = null
+    srcStats.value = { count: 0, bytes: 0 }
     return
   }
+  srcStats.value = { count: 0, bytes: 0 }
+  counting.value = true
   try {
     const res = await countFiles(p)
-    srcStats.value = res
+    if (seq === srcStatsSeq) {
+      counting.value = false
+      srcStats.value = res
+    }
   } catch {
-    srcStats.value = null
+    if (seq === srcStatsSeq) {
+      counting.value = false
+      srcStats.value = { count: 0, bytes: 0 }
+    }
   }
 }
 
+// 切换源路径: 立即清零并停掉上一次遍历, 稍作防抖后开始统计新的路径
 watch(srcPath, () => {
+  srcStatsSeq++
   clearTimeout(srcStatsTimer)
-  srcStatsTimer = setTimeout(updateSrcStats, 400)
+  srcStats.value = { count: 0, bytes: 0 }
+  counting.value = false
+  void cancelCount()
+  srcStatsTimer = setTimeout(updateSrcStats, 300)
 })
+
+// 初始化默认路径: 优先恢复当前驱动器上次备份目录, 否则使用用户主目录
+async function initSrcPath() {
+  const drivePath = volumes.value[srcDev.value]?.path
+  const last = loadLastSrcPath(drivePath)
+  if (last) {
+    srcPath.value = last
+    return
+  }
+  try {
+    srcPath.value = await homeDir()
+  } catch {
+    // ignore, keep empty
+  }
+}
+
+function loadLastSrcPath(drivePath: string | undefined): string {
+  if (!drivePath) return ''
+  try {
+    const map = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Record<string, string>
+    return map[drivePath] || ''
+  } catch {
+    return ''
+  }
+}
+
+function saveSrcPath() {
+  const p = srcPath.value.trim()
+  const drivePath = driveRootOf(p)
+  if (!p || !drivePath) return
+  try {
+    const map = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Record<string, string>
+    map[drivePath] = p
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
+  } catch {
+    // ignore
+  }
+}
 const dstPath = ref('/Users/zhao/Pictures/SafeKeep')
 const srcDev = ref(0)
 const org = ref(1)
@@ -113,9 +182,21 @@ const dstPct = computed(() => {
   return Math.round(((dstTotal.value - dstFree.value) / dstTotal.value) * 100)
 })
 
-function selectDev(i: number) {
+// 切换源路径: 本机盘若未记忆过上次目录, 默认落到用户主目录, 避免对整个系统盘全量统计
+async function selectDev(i: number) {
   srcDev.value = i
-  srcPath.value = volumes.value[i]?.path ?? ''
+  const device = volumes.value[i]
+  const drivePath = device?.path
+  let p = loadLastSrcPath(drivePath)
+  if (!p && device?.device_type === 'LocalDisk' && drivePath) {
+    try {
+      const home = await homeDir()
+      if (home.startsWith(drivePath)) p = home
+    } catch {
+      // ignore, keep drive root
+    }
+  }
+  srcPath.value = p || drivePath || ''
 }
 
 // 设备列表变化时只修正选中索引，不自动改写源路径,
@@ -139,6 +220,7 @@ const orgKeys: Record<OrgOpt, string> = {
 }
 
 function startScan() {
+  saveSrcPath()
   router.push({ name: 'preview' })
 }
 </script>
@@ -155,13 +237,7 @@ function startScan() {
       <DesignCard padding="18px">
         <div class="card-section">
           <div class="section-title">
-            <span class="icon-accent">
-              <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"
-                />
-              </svg>
-            </span>
+            <span class="icon-accent"><icon-local-phone /></span>
             <DesignLabel :text="$t('home.source_device')" />
           </div>
 
@@ -175,41 +251,15 @@ function startScan() {
             >
               <span class="device-name" :class="{ 'text-accent': srcDev === i }">
                 <span class="device-icon">
-                  <svg
-                    v-if="d.icon === 'phone'"
-                    width="13"
-                    height="13"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path
-                      d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"
-                    />
-                  </svg>
-                  <svg
-                    v-else-if="d.icon === 'sd'"
-                    width="13"
-                    height="13"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M3 5a2 2 0 012-2h6l4 4v8a2 2 0 01-2 2H5a2 2 0 01-2-2V5zm7 0v3h3l-3-3z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <svg v-else width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-                    <path
-                      fillRule="evenodd"
-                      d="M2 5a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm14 1a1 1 0 11-2 0 1 1 0 012 0zM2 13a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2zm14 1a1 1 0 11-2 0 1 1 0 012 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+                  <icon-local-phone v-if="d.icon === 'phone'" />
+                  <icon-local-sd v-else-if="d.icon === 'sd'" />
+                  <icon-local-hdd v-else />
                 </span>
                 {{ d.label }}
               </span>
-              <span class="device-sub">{{ formatBytes(d.usedBytes) }}</span>
+              <span class="device-sub">{{
+                $t('home.used_space', { size: formatBytes(d.usedBytes) })
+              }}</span>
             </button>
           </div>
 
@@ -218,11 +268,13 @@ function startScan() {
             :value="srcPath"
             :placeholder="$t('home.source_placeholder')"
             :hint="
-              srcStats
-                ? $t('home.scan_hint', {
-                    files: srcStats.count.toLocaleString(),
-                    size: formatBytes(srcStats.bytes)
-                  })
+              srcPath.trim()
+                ? counting
+                  ? $t('home.scanning')
+                  : $t('home.scan_hint', {
+                      files: srcStats.count.toLocaleString(),
+                      size: formatBytes(srcStats.bytes)
+                    })
                 : undefined
             "
             @update:value="srcPath = $event"
@@ -248,15 +300,7 @@ function startScan() {
       <DesignCard padding="18px">
         <div class="card-section">
           <div class="section-title">
-            <span class="icon-new">
-              <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M2 5a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm14 1a1 1 0 11-2 0 1 1 0 012 0zM2 13a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2zm14 1a1 1 0 11-2 0 1 1 0 012 0z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </span>
+            <span class="icon-new"><icon-local-hdd /></span>
             <DesignLabel :text="$t('home.destination')" />
           </div>
 
@@ -298,13 +342,7 @@ function startScan() {
       <div class="filters-grid">
         <div class="filter-col">
           <div class="filter-header text-backed">
-            <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <icon-local-image />
             <DesignLabel :text="$t('home.filter_images')" />
           </div>
           <div class="toggle-row">
@@ -319,11 +357,7 @@ function startScan() {
         </div>
         <div class="filter-col">
           <div class="filter-header text-modified">
-            <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0013 8v4a1 1 0 001.553.894l3-2a1 1 0 000-1.788l-3-2z"
-              />
-            </svg>
+            <icon-local-video />
             <DesignLabel :text="$t('home.filter_videos')" />
           </div>
           <div class="toggle-row">
@@ -355,13 +389,7 @@ function startScan() {
     <div class="page-actions">
       <button class="btn-secondary">{{ $t('home.save_preset') }}</button>
       <button class="btn-primary" @click="startScan">
-        <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor">
-          <path
-            fillRule="evenodd"
-            d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
-            clipRule="evenodd"
-          />
-        </svg>
+        <icon-local-search />
         {{ $t('home.start_scan') }}
       </button>
     </div>

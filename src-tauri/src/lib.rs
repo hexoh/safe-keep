@@ -18,7 +18,7 @@ use commands::cleanup::{
 use commands::restore::{cancel_restore, get_restorable_files, start_restore, RestoreState};
 use commands::device::{detect_device, list_devices};
 use commands::export::write_text_file;
-use commands::scan::{cancel_scan, count_files, start_scan, ScannerState};
+use commands::scan::{cancel_count, cancel_scan, count_files, start_scan, CountState, ScannerState};
 use commands::settings::{get_settings, save_settings};
 use database::Database;
 use tauri::Manager;
@@ -29,6 +29,9 @@ pub fn run() {
   tauri::Builder::default()
     .manage(ScannerState {
       scanner: std::sync::Mutex::new(None),
+    })
+    .manage(CountState {
+      cancel: std::sync::Mutex::new(None),
     })
     .manage(BackupState::new())
     .manage(CleanupState::new())
@@ -58,6 +61,7 @@ pub fn run() {
       start_scan,
       cancel_scan,
       count_files,
+      cancel_count,
       start_backup,
       pause_backup,
       resume_backup,
