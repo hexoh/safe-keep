@@ -30,6 +30,8 @@
   "home.free_space": "剩余空间",
   "home.available_space": "{size} 可用",
   "home.organize_by": "按目录结构组织输出",
+  "home.org_yyyy_mm_dd": "年/月/日",
+  "home.org_yyyy_mm": "年/月",
   "home.org_flat": "平铺",
   "home.file_size_mb": "文件大小（MB）",
   "home.no_limit": "无限制",

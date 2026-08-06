@@ -1,5 +1,7 @@
 <script setup lang="ts">
-defineProps<{
+import { open } from '@tauri-apps/plugin-dialog'
+
+const props = defineProps<{
   label: string
   value: string
   placeholder: string
@@ -9,6 +11,21 @@ defineProps<{
 const emit = defineEmits<{
   'update:value': [value: string]
 }>()
+
+async function browse() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: props.value
+    })
+    if (selected) {
+      emit('update:value', selected)
+    }
+  } catch {
+    // dialog unavailable (e.g. permission not granted)
+  }
+}
 </script>
 
 <template>
@@ -21,7 +38,7 @@ const emit = defineEmits<{
         :placeholder="placeholder"
         class="path-field"
       />
-      <button class="browse-btn">
+      <button class="browse-btn" @click="browse">
         <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
           <path d="M2 6a2 2 0 012-2h4l2 2h4a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>

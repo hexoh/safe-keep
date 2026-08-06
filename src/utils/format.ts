@@ -1,9 +1,10 @@
+// 十进制 (1000 进制) 容量格式化，与厂商 / 系统惯例一致
 export function formatBytes(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let size = bytes
   let unitIdx = 0
-  while (size >= 1024 && unitIdx < units.length - 1) {
-    size /= 1024
+  while (size >= 1000 && unitIdx < units.length - 1) {
+    size /= 1000
     unitIdx++
   }
   return `${size.toFixed(unitIdx > 0 ? 2 : 0)} ${units[unitIdx]}`

@@ -20,8 +20,45 @@ pub struct ScanOptions {
   pub max_size: Option<u64>,
 }
 
+#[allow(dead_code)]
 pub struct ScannerState {
   pub scanner: std::sync::Mutex<Option<FileScanner>>,
+}
+
+/// 统计目录下媒体文件数量与大小（用于首页提示，不执行完整对比）
+///
+/// 异步 + spawn_blocking，避免在后台遍历大目录时阻塞主线程导致卡死。
+#[tauri::command]
+pub async fn count_files(path: String) -> Result<(u64, u64), String> {
+  let task = tauri::async_runtime::spawn_blocking(move || {
+    let root = std::path::Path::new(&path);
+    if !root.is_dir() {
+      return (0, 0);
+    }
+    let mut count = 0u64;
+    let mut bytes = 0u64;
+    for entry in walkdir::WalkDir::new(root)
+      .follow_links(false)
+      .into_iter()
+      .filter_map(|e| e.ok())
+    {
+      if entry.file_type().is_file() {
+        let name = entry.file_name().to_string_lossy();
+        if name.starts_with("._") || name == ".DS_Store" || name.starts_with('.') {
+          continue;
+        }
+        if crate::scanner::filter::is_supported_file(entry.path()) {
+          count += 1;
+          if let Ok(m) = entry.metadata() {
+            bytes += m.len();
+          }
+        }
+      }
+    }
+    (count, bytes)
+  });
+
+  task.await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

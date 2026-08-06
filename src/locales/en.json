@@ -30,6 +30,8 @@
   "home.free_space": "Free space",
   "home.available_space": "{size} available",
   "home.organize_by": "Organize output by",
+  "home.org_yyyy_mm_dd": "YYYY/MM/DD",
+  "home.org_yyyy_mm": "YYYY/MM",
   "home.org_flat": "Flat",
   "home.file_size_mb": "File Size (MB)",
   "home.no_limit": "No limit",

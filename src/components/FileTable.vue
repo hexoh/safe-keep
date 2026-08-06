@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { FileEntry } from '@/types/file'
+import { formatBytes } from '@/utils/format'
 
 defineProps<{
   files: FileEntry[]
@@ -13,17 +14,6 @@ const statusTag = {
   backed_up: 'info',
   changed: 'warning'
 } as const
-
-function formatSize(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = bytes
-  let unitIdx = 0
-  while (size >= 1024 && unitIdx < units.length - 1) {
-    size /= 1024
-    unitIdx++
-  }
-  return `${size.toFixed(unitIdx > 0 ? 2 : 0)} ${units[unitIdx]}`
-}
 
 function formatDate(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString()
@@ -47,7 +37,7 @@ function formatDate(timestamp: number): string {
     />
     <el-table-column :label="$t('preview.size')" width="100" sortable>
       <template #default="{ row }: { row: FileEntry }">
-        {{ formatSize(row.file_size) }}
+        {{ formatBytes(row.file_size) }}
       </template>
     </el-table-column>
     <el-table-column :label="$t('preview.modified_at')" width="180" sortable>

@@ -1,10 +1,44 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { IMAGE_FORMATS, VIDEO_FORMATS } from '@/constants/media'
+import { useDevice } from '@/composables/useDevice'
+import { formatBytes } from '@/utils/format'
+import { countFiles } from '@/api/scan'
 
 const router = useRouter()
+const { devices: volumes, refresh, watchDevices } = useDevice()
 
-const srcPath = ref('/Volumes/iPhone 15 Pro/DCIM')
+onMounted(async () => {
+  try {
+    await refresh()
+  } catch {
+    // ignore device read errors, keep source path as-is
+  }
+  watchDevices()
+})
+
+const srcPath = ref('')
+const srcStats = ref<{ count: number; bytes: number } | null>(null)
+let srcStatsTimer: ReturnType<typeof setTimeout> | undefined
+
+async function updateSrcStats() {
+  const p = srcPath.value.trim()
+  if (!p) {
+    srcStats.value = null
+    return
+  }
+  try {
+    const res = await countFiles(p)
+    srcStats.value = res
+  } catch {
+    srcStats.value = null
+  }
+}
+
+watch(srcPath, () => {
+  clearTimeout(srcStatsTimer)
+  srcStatsTimer = setTimeout(updateSrcStats, 400)
+})
 const dstPath = ref('/Users/zhao/Pictures/SafeKeep')
 const srcDev = ref(0)
 const org = ref(1)
@@ -33,34 +67,76 @@ function toggleFmt(k: keyof typeof fmts) {
   fmts[k] = !fmts[k]
 }
 
-const devices = [
-  {
-    icon: 'phone',
-    label: 'iPhone 15 Pro',
-    subKey: 'home.used_gb',
-    subArgs: { size: '47.2' },
-    pct: 37,
-    connected: true
-  },
-  {
-    icon: 'sd',
-    label: 'SanDisk 32 GB',
-    subKey: 'home.used_gb',
-    subArgs: { size: '18.1' },
-    pct: 56,
-    connected: true
-  },
-  {
-    icon: 'hdd',
-    label: 'USB Drive',
-    subKey: 'home.not_detected',
-    subArgs: {},
-    pct: 0,
-    connected: false
-  }
-]
+const deviceIcons: Record<string, string> = {
+  MTP: 'phone',
+  RemovableDisk: 'sd',
+  LocalDisk: 'hdd',
+  Unknown: 'hdd'
+}
 
-const orgOpts = ['YYYY/MM/DD', 'YYYY/MM', 'Flat']
+const devices = computed(() =>
+  volumes.value.map((v, i) => {
+    const used = v.total_space > 0 ? Math.max(0, v.total_space - v.free_space) : 0
+    const pct = v.total_space > 0 ? Math.round((used / v.total_space) * 100) : 0
+    return {
+      icon: deviceIcons[v.device_type] ?? 'hdd',
+      label: v.name,
+      usedBytes: used,
+      pct,
+      connected: true,
+      index: i
+    }
+  })
+)
+
+const selectedDevice = computed(() => volumes.value[srcDev.value])
+
+const selectedPct = computed(() => {
+  const v = selectedDevice.value
+  if (!v || v.total_space <= 0) return 0
+  return Math.round(((v.total_space - v.free_space) / v.total_space) * 100)
+})
+
+// 按已用比例返回进度条颜色: 充足=绿, 偏高=黄, 紧张=红
+function storageColor(pct: number): string {
+  if (pct >= 90) return 'var(--failed)'
+  if (pct >= 75) return 'var(--modified)'
+  return 'var(--new)'
+}
+
+// 目标路径所在卷的空间
+const dstVolume = computed(() => volumes.value.find((v) => dstPath.value.startsWith(v.path)))
+const dstFree = computed(() => (dstVolume.value ? dstVolume.value.free_space : 0))
+const dstTotal = computed(() => (dstVolume.value ? dstVolume.value.total_space : 0))
+const dstPct = computed(() => {
+  if (dstTotal.value <= 0) return 0
+  return Math.round(((dstTotal.value - dstFree.value) / dstTotal.value) * 100)
+})
+
+function selectDev(i: number) {
+  srcDev.value = i
+  srcPath.value = volumes.value[i]?.path ?? ''
+}
+
+// 设备列表变化时只修正选中索引，不自动改写源路径,
+// 避免启动时对整个系统盘触发全量统计导致卡顿
+watch(volumes, (v: string | any[]) => {
+  if (v.length === 0) {
+    srcDev.value = 0
+    return
+  }
+  if (srcDev.value >= v.length) {
+    srcDev.value = v.length - 1
+  }
+})
+
+type OrgOpt = 'YYYY/MM/DD' | 'YYYY/MM' | 'Flat'
+const orgOpts: OrgOpt[] = ['YYYY/MM/DD', 'YYYY/MM', 'Flat']
+const orgKeys: Record<OrgOpt, string> = {
+  'YYYY/MM/DD': 'home.org_yyyy_mm_dd',
+  'YYYY/MM': 'home.org_yyyy_mm',
+  Flat: 'home.org_flat'
+}
 
 function startScan() {
   router.push({ name: 'preview' })
@@ -95,7 +171,7 @@ function startScan() {
               :key="i"
               :class="['device-btn', { selected: srcDev === i }]"
               :disabled="!d.connected"
-              @click="srcDev = i"
+              @click="selectDev(i)"
             >
               <span class="device-name" :class="{ 'text-accent': srcDev === i }">
                 <span class="device-icon">
@@ -133,7 +209,7 @@ function startScan() {
                 </span>
                 {{ d.label }}
               </span>
-              <span class="device-sub">{{ $t(d.subKey, d.subArgs) }}</span>
+              <span class="device-sub">{{ formatBytes(d.usedBytes) }}</span>
             </button>
           </div>
 
@@ -141,16 +217,29 @@ function startScan() {
             :label="$t('home.source_path')"
             :value="srcPath"
             :placeholder="$t('home.source_placeholder')"
-            :hint="$t('home.scan_hint', { files: '1,247', size: '4.3 GB' })"
+            :hint="
+              srcStats
+                ? $t('home.scan_hint', {
+                    files: srcStats.count.toLocaleString(),
+                    size: formatBytes(srcStats.bytes)
+                  })
+                : undefined
+            "
             @update:value="srcPath = $event"
           />
 
           <div class="storage-row">
             <div class="storage-row-header">
               <span>{{ $t('home.device_storage') }}</span>
-              <span class="mono">47.2 / 128 GB</span>
+              <span class="mono">
+                {{
+                  selectedDevice
+                    ? `${formatBytes(selectedDevice.total_space - selectedDevice.free_space)} / ${formatBytes(selectedDevice.total_space)} · ${$t('home.available_space', { size: formatBytes(selectedDevice.free_space) })}`
+                    : '--'
+                }}
+              </span>
             </div>
-            <ProgressBar :value="37" />
+            <ProgressBar :value="selectedPct" :color="storageColor(selectedPct)" />
           </div>
         </div>
       </DesignCard>
@@ -182,10 +271,10 @@ function startScan() {
             <div class="storage-row-header">
               <span>{{ $t('home.free_space') }}</span>
               <span class="mono text-new" style="font-weight: 600">{{
-                $t('home.available_space', { size: '412.8 GB' })
+                $t('home.available_space', { size: formatBytes(dstFree) })
               }}</span>
             </div>
-            <ProgressBar :value="41" :color="'var(--new)'" />
+            <ProgressBar :value="dstPct" :color="storageColor(dstPct)" />
           </div>
 
           <div class="org-section">
@@ -194,7 +283,7 @@ function startScan() {
               <DesignToggle
                 v-for="(o, i) in orgOpts"
                 :key="o"
-                :label="o === 'Flat' ? $t('home.org_flat') : o"
+                :label="$t(orgKeys[o])"
                 :on="org === i"
                 @change="org = i"
               />

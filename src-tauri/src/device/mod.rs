@@ -1,8 +1,9 @@
 pub mod detect;
+pub mod list;
 
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum DeviceType {
   /// Android 手机 MTP 连接
   MTP,
