@@ -38,6 +38,8 @@
   "home.file_size_mb": "File Size (MB)",
   "home.no_limit": "No limit",
   "home.save_preset": "Save Preset",
+  "home.preset_saved": "Preset saved",
+  "home.preset_save_failed": "Failed to save preset",
   "home.start_scan": "Start Scan",
   "home.used_gb": "{size} GB used",
   "home.not_detected": "Not detected",

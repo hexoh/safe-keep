@@ -104,12 +104,19 @@ const MOCK_FILES = [
 
 const sel = ref(new Set<number>())
 const page = ref(1)
-const filter = ref<'all' | 'new' | 'backed' | 'modified' | 'failed'>('all')
+type FileStatus = 'new' | 'backed' | 'modified' | 'failed'
+type FilterKey = 'all' | FileStatus
+const filter = ref<FilterKey>('all')
 const PER = 7
 
 const filtered = computed(() => {
   return filter.value === 'all' ? MOCK_FILES : MOCK_FILES.filter((f) => f.status === filter.value)
 })
+
+function selectFilter(f: FilterKey) {
+  filter.value = f
+  page.value = 1
+}
 
 const paged = computed(() => filtered.value.slice((page.value - 1) * PER, page.value * PER))
 
@@ -187,10 +194,7 @@ function toggleAll() {
         v-for="f in ['all', 'new', 'backed', 'modified', 'failed'] as const"
         :key="f"
         :class="['filter-tab', { active: filter === f }]"
-        @click="
-          filter = f
-          page = 1
-        "
+        @click="selectFilter(f)"
       >
         {{ f.charAt(0).toUpperCase() + f.slice(1) }}
         <span v-if="f !== 'all'" class="filter-count">{{ counts[f as keyof typeof counts] }}</span>

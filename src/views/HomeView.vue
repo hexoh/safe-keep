@@ -5,8 +5,31 @@ import { useDevice } from '@/composables/useDevice'
 import { formatBytes } from '@/utils/format'
 import { countFiles, cancelCount } from '@/api/scan'
 import { homeDir } from '@tauri-apps/api/path'
+import { ElMessage } from 'element-plus'
+import { i18n } from '@/locales'
 
-const STORAGE_KEY = 'safe-keep.last-src-path'
+const STATE_KEY = 'safe-keep.last-device'
+const PRESET_KEY = 'safe-keep.last-preset'
+
+// 每个驱动器的记忆对象: { src: 上次源路径, dst: 上次目标路径 }
+type DriveState = { src?: string; dst?: string }
+
+function loadState(): Record<string, DriveState> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STATE_KEY) || '{}') as Record<string, DriveState>
+    return typeof parsed === 'object' && parsed !== null ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveState(map: Record<string, DriveState>) {
+  try {
+    localStorage.setItem(STATE_KEY, JSON.stringify(map))
+  } catch {
+    // ignore
+  }
+}
 
 // 找出路径所属的驱动器根路径（/、/Volumes/xxx 等），用于按驱动器分别记忆
 function driveRootOf(path: string): string {
@@ -24,6 +47,7 @@ const { devices: volumes, refresh, watchDevices } = useDevice()
 
 onMounted(async () => {
   initSrcPath()
+  initDstPath()
   try {
     await refresh()
   } catch {
@@ -88,27 +112,47 @@ async function initSrcPath() {
 
 function loadLastSrcPath(drivePath: string | undefined): string {
   if (!drivePath) return ''
-  try {
-    const map = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Record<string, string>
-    return map[drivePath] || ''
-  } catch {
-    return ''
-  }
+  return loadState()[drivePath]?.src || ''
 }
 
 function saveSrcPath() {
   const p = srcPath.value.trim()
   const drivePath = driveRootOf(p)
   if (!p || !drivePath) return
+  const map = loadState()
+  map[drivePath] = { ...map[drivePath], src: p }
+  saveState(map)
+}
+
+function loadLastDstPath(drivePath: string | undefined): string {
+  if (!drivePath) return ''
+  return loadState()[drivePath]?.dst || ''
+}
+
+// 目标路径与左边源设备联动: 按源设备所属驱动器分别记忆上次备份目录, 无记录时默认个人文件夹
+async function initDstPath() {
+  const drivePath = volumes.value[srcDev.value]?.path
+  const last = loadLastDstPath(drivePath)
+  if (last) {
+    dstPath.value = last
+    return
+  }
   try {
-    const map = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Record<string, string>
-    map[drivePath] = p
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
+    dstPath.value = await homeDir()
   } catch {
-    // ignore
+    // ignore, keep empty
   }
 }
-const dstPath = ref('/Users/zhao/Pictures/SafeKeep')
+
+function saveDstPath() {
+  const dst = dstPath.value.trim()
+  const drivePath = driveRootOf(srcPath.value)
+  if (!dst || !drivePath) return
+  const map = loadState()
+  map[drivePath] = { ...map[drivePath], dst }
+  saveState(map)
+}
+const dstPath = ref('')
 const srcDev = ref(0)
 const org = ref(1)
 const minSz = ref('0')
@@ -197,6 +241,17 @@ async function selectDev(i: number) {
     }
   }
   srcPath.value = p || drivePath || ''
+
+  const lastDst = loadLastDstPath(drivePath)
+  if (lastDst) {
+    dstPath.value = lastDst
+  } else {
+    try {
+      dstPath.value = await homeDir()
+    } catch {
+      // ignore, keep as-is
+    }
+  }
 }
 
 // 设备列表变化时只修正选中索引，不自动改写源路径,
@@ -221,7 +276,32 @@ const orgKeys: Record<OrgOpt, string> = {
 
 function startScan() {
   saveSrcPath()
+  saveDstPath()
   router.push({ name: 'preview' })
+}
+
+type Preset = {
+  srcDev: number
+  org: number
+  minSz: string
+  maxSz: string
+  fmts: typeof fmts
+}
+
+function savePreset() {
+  const preset: Preset = {
+    srcDev: srcDev.value,
+    org: org.value,
+    minSz: minSz.value,
+    maxSz: maxSz.value,
+    fmts: { ...fmts }
+  }
+  try {
+    localStorage.setItem(PRESET_KEY, JSON.stringify(preset))
+    ElMessage.success(i18n.global.t('home.preset_saved'))
+  } catch {
+    ElMessage.error(i18n.global.t('home.preset_save_failed'))
+  }
 }
 </script>
 
@@ -387,7 +467,7 @@ function startScan() {
     </DesignCard>
 
     <div class="page-actions">
-      <button class="btn-secondary">{{ $t('home.save_preset') }}</button>
+      <button class="btn-secondary" @click="savePreset">{{ $t('home.save_preset') }}</button>
       <button class="btn-primary" @click="startScan">
         <icon-local-search />
         {{ $t('home.start_scan') }}

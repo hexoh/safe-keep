@@ -38,6 +38,8 @@
   "home.file_size_mb": "文件大小（MB）",
   "home.no_limit": "无限制",
   "home.save_preset": "保存预设",
+  "home.preset_saved": "预设已保存",
+  "home.preset_save_failed": "预设保存失败",
   "home.start_scan": "开始扫描",
   "home.used_gb": "已用 {size} GB",
   "home.not_detected": "未检测到",
