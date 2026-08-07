@@ -8,6 +8,7 @@ const badgeMap: Record<string, { label: string; color: string; bg: string }> = {
   backed: { label: 'Backed Up', color: 'var(--backed)', bg: 'var(--backed-bg)' },
   backed_up: { label: 'Backed Up', color: 'var(--backed)', bg: 'var(--backed-bg)' },
   modified: { label: 'Modified', color: 'var(--modified)', bg: 'var(--modified-bg)' },
+  changed: { label: 'Changed', color: 'var(--modified)', bg: 'var(--modified-bg)' },
   failed: { label: 'Failed', color: 'var(--failed)', bg: 'var(--failed-bg)' },
   success: { label: 'Success', color: 'var(--new)', bg: 'var(--new-bg)' },
   partial: { label: 'Partial', color: 'var(--modified)', bg: 'var(--modified-bg)' },

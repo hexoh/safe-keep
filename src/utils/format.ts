@@ -10,8 +10,17 @@ export function formatBytes(bytes: number): string {
   return `${size.toFixed(unitIdx > 0 ? 2 : 0)} ${units[unitIdx]}`
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
 export function formatDate(ts: number): string {
   return new Date(ts * 1000).toLocaleDateString()
+}
+
+export function formatDateTime(ts: number): string {
+  const d = new Date(ts * 1000)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
 export function formatDuration(secs: number): string {

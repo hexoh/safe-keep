@@ -1,116 +1,73 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { convertFileSrc } from '@tauri-apps/api/core'
+import { useScanStore } from '@/stores/scan'
+import { formatBytes, formatDateTime } from '@/utils/format'
+import type { FileEntry } from '@/types/file'
 
 const router = useRouter()
+const scanStore = useScanStore()
 
-const MOCK_FILES = [
-  {
-    id: 1,
-    name: 'IMG_20240315_142301.jpg',
-    sizeStr: '4.1 MB',
-    modified: '2024-03-15 14:23',
-    status: 'new',
-    type: 'image'
-  },
-  {
-    id: 2,
-    name: 'VID_20240315_091022.mp4',
-    sizeStr: '128.5 MB',
-    modified: '2024-03-15 09:10',
-    status: 'new',
-    type: 'video'
-  },
-  {
-    id: 3,
-    name: 'IMG_20240314_180534.jpg',
-    sizeStr: '3.8 MB',
-    modified: '2024-03-14 18:05',
-    status: 'backed',
-    type: 'image'
-  },
-  {
-    id: 4,
-    name: 'IMG_20240314_155203.heic',
-    sizeStr: '6.1 MB',
-    modified: '2024-03-14 15:52',
-    status: 'modified',
-    type: 'image'
-  },
-  {
-    id: 5,
-    name: 'VID_20240313_221045.mov',
-    sizeStr: '256.3 MB',
-    modified: '2024-03-13 22:10',
-    status: 'new',
-    type: 'video'
-  },
-  {
-    id: 6,
-    name: 'IMG_20240313_102234.png',
-    sizeStr: '7.0 MB',
-    modified: '2024-03-13 10:22',
-    status: 'backed',
-    type: 'image'
-  },
-  {
-    id: 7,
-    name: 'IMG_20240312_195511.jpg',
-    sizeStr: '3.5 MB',
-    modified: '2024-03-12 19:55',
-    status: 'new',
-    type: 'image'
-  },
-  {
-    id: 8,
-    name: 'VID_20240312_154323.mp4',
-    sizeStr: '100.0 MB',
-    modified: '2024-03-12 15:43',
-    status: 'failed',
-    type: 'video'
-  },
-  {
-    id: 9,
-    name: 'IMG_20240311_083412.heic',
-    sizeStr: '5.0 MB',
-    modified: '2024-03-11 08:34',
-    status: 'new',
-    type: 'image'
-  },
-  {
-    id: 10,
-    name: 'IMG_20240310_171922.jpg',
-    sizeStr: '2.5 MB',
-    modified: '2024-03-10 17:19',
-    status: 'backed',
-    type: 'image'
-  },
-  {
-    id: 11,
-    name: 'VID_20240309_143021.mp4',
-    sizeStr: '87.3 MB',
-    modified: '2024-03-09 14:30',
-    status: 'new',
-    type: 'video'
-  },
-  {
-    id: 12,
-    name: 'IMG_20240308_092145.jpg',
-    sizeStr: '3.2 MB',
-    modified: '2024-03-08 09:21',
-    status: 'modified',
-    type: 'image'
+onMounted(() => {
+  if (scanStore.status === 'idle' && scanStore.options) {
+    void scanStore.beginScan(scanStore.options)
   }
-]
+})
 
-const sel = ref(new Set<number>())
+onBeforeUnmount(() => {
+  if (scanStore.status === 'scanning') void scanStore.cancel()
+})
+
+const sel = ref(new Set<string>())
 const page = ref(1)
-type FileStatus = 'new' | 'backed' | 'modified' | 'failed'
+type FileStatus = 'new' | 'backed_up' | 'changed'
 type FilterKey = 'all' | FileStatus
 const filter = ref<FilterKey>('all')
 const PER = 7
 
+const files = computed(() => scanStore.files)
+
 const filtered = computed(() => {
-  return filter.value === 'all' ? MOCK_FILES : MOCK_FILES.filter((f) => f.status === filter.value)
+  if (filter.value === 'all') return files.value
+  return files.value.filter((f) => f.status === filter.value)
+})
+
+const paged = computed(() => filtered.value.slice((page.value - 1) * PER, page.value * PER))
+
+const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / PER)))
+
+const counts = computed(() => ({
+  new: files.value.filter((f) => f.status === 'new').length,
+  backed_up: files.value.filter((f) => f.status === 'backed_up').length,
+  changed: files.value.filter((f) => f.status === 'changed').length
+}))
+
+const totalSize = computed(() => formatBytes(scanStore.totalSize))
+
+const progressPct = computed(() => {
+  const t = scanStore.progress.total
+  if (t && t > 0) return Math.round((scanStore.progress.scanned / t) * 100)
+  return null
+})
+
+const pageItems = computed<(number | 'left' | 'right')[]>(() => {
+  const last = pages.value
+  const cur = page.value
+  if (last <= 7) {
+    return Array.from({ length: last }, (_, i) => i + 1)
+  }
+  const items: (number | 'left' | 'right')[] = [1]
+  const start = Math.max(2, cur - 2)
+  const end = Math.min(last - 1, cur + 2)
+  if (start > 2) items.push('left')
+  for (let i = start; i <= end; i++) items.push(i)
+  if (end < last - 1) items.push('right')
+  items.push(last)
+  return items
+})
+
+watch(filtered, () => {
+  if (page.value > pages.value) page.value = pages.value
 })
 
 function selectFilter(f: FilterKey) {
@@ -118,21 +75,14 @@ function selectFilter(f: FilterKey) {
   page.value = 1
 }
 
-const paged = computed(() => filtered.value.slice((page.value - 1) * PER, page.value * PER))
+function goPage(p: number) {
+  if (p >= 1 && p <= pages.value) page.value = p
+}
 
-const pages = computed(() => Math.ceil(filtered.value.length / PER))
-
-const counts = computed(() => ({
-  new: MOCK_FILES.filter((f) => f.status === 'new').length,
-  backed: MOCK_FILES.filter((f) => f.status === 'backed').length,
-  modified: MOCK_FILES.filter((f) => f.status === 'modified').length,
-  failed: MOCK_FILES.filter((f) => f.status === 'failed').length
-}))
-
-function toggleFile(id: number) {
+function toggleFile(path: string) {
   const n = new Set(sel.value)
-  if (n.has(id)) n.delete(id)
-  else n.add(id)
+  if (n.has(path)) n.delete(path)
+  else n.add(path)
   sel.value = n
 }
 
@@ -140,7 +90,18 @@ function toggleAll() {
   sel.value =
     sel.value.size === paged.value.length && paged.value.length > 0
       ? new Set()
-      : new Set(paged.value.map((f) => f.id))
+      : new Set(paged.value.map((f) => f.path))
+}
+
+function retry() {
+  if (scanStore.options) void scanStore.beginScan(scanStore.options)
+}
+
+const previewing = ref<FileEntry | null>(null)
+const previewSrc = computed(() => (previewing.value ? convertFileSrc(previewing.value.path) : ''))
+
+function openPreview(f: FileEntry) {
+  previewing.value = f
 }
 </script>
 
@@ -148,140 +109,213 @@ function toggleAll() {
   <div class="preview-view">
     <div class="page-header">
       <div>
-        <h1>Scan Preview</h1>
-        <p>Review files before backup. Deselect to skip.</p>
+        <h1>{{ $t('preview.title') }}</h1>
+        <p>{{ $t('preview.subtitle') }}</p>
       </div>
       <div class="header-actions">
-        <button class="btn-secondary-sm" @click="router.push({ name: 'home' })">← Back</button>
-        <button class="btn-primary-sm" @click="router.push({ name: 'backup' })">
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z"
-              clipRule="evenodd"
-            />
-          </svg>
-          Start Backup · {{ counts.new + counts.modified }} files
+        <button class="btn-secondary-sm" @click="router.push({ name: 'home' })">
+          ← {{ $t('common.back') }}
+        </button>
+        <button
+          class="btn-primary-sm"
+          :disabled="scanStore.status !== 'done' || files.length === 0"
+          @click="router.push({ name: 'backup' })"
+        >
+          <icon-local-upload />
+          {{ $t('preview.start_backup') }} · {{ counts.new + counts.changed }}
+          {{ $t('preview.files') }}
         </button>
       </div>
     </div>
 
     <div class="stats-grid">
-      <DesignStatCard label="Total Files" :value="MOCK_FILES.length" sub="527.8 MB total" />
-      <DesignStatCard label="New" :value="counts.new" sub="Will be copied" color="var(--new)" />
       <DesignStatCard
-        label="Already Backed"
-        :value="counts.backed"
-        sub="Skip (identical)"
+        :label="$t('preview.total_files')"
+        :value="files.length"
+        :sub="$t('preview.total_size_hint', { size: totalSize })"
+      />
+      <DesignStatCard
+        :label="$t('preview.new_files')"
+        :value="counts.new"
+        :sub="$t('preview.new_hint')"
+        color="var(--new)"
+      />
+      <DesignStatCard
+        :label="$t('preview.backed_up_files')"
+        :value="counts.backed_up"
+        :sub="$t('preview.backed_hint')"
         color="var(--backed)"
       />
       <DesignStatCard
-        label="Modified"
-        :value="counts.modified"
-        sub="Changed on device"
+        :label="$t('preview.changed_files')"
+        :value="counts.changed"
+        :sub="$t('preview.modified_hint')"
         color="var(--modified)"
       />
-      <DesignStatCard
-        label="Failed"
-        :value="counts.failed"
-        sub="Cannot read"
-        color="var(--failed)"
-      />
     </div>
 
-    <div class="filter-tabs">
-      <button
-        v-for="f in ['all', 'new', 'backed', 'modified', 'failed'] as const"
-        :key="f"
-        :class="['filter-tab', { active: filter === f }]"
-        @click="selectFilter(f)"
-      >
-        {{ f.charAt(0).toUpperCase() + f.slice(1) }}
-        <span v-if="f !== 'all'" class="filter-count">{{ counts[f as keyof typeof counts] }}</span>
-      </button>
-    </div>
-
-    <DesignCard style="display: flex; overflow: hidden; flex: 1; flex-direction: column">
-      <div class="table-wrapper">
-        <table class="design-table">
-          <thead>
-            <tr>
-              <th class="th-check">
-                <input
-                  type="checkbox"
-                  :checked="sel.size === paged.length && paged.length > 0"
-                  @change="toggleAll"
-                />
-              </th>
-              <th>File Name</th>
-              <th class="th-type">Type</th>
-              <th class="th-size">Size</th>
-              <th class="th-modified">Modified</th>
-              <th class="th-status">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="f in paged"
-              :key="f.id"
-              :class="['table-row', { selected: sel.has(f.id) }]"
-              @click="toggleFile(f.id)"
-            >
-              <td class="td-check">
-                <input type="checkbox" :checked="sel.has(f.id)" @click.stop="toggleFile(f.id)" />
-              </td>
-              <td>
-                <span class="mono-sm">{{ f.name }}</span>
-              </td>
-              <td>
-                <span :class="['file-type', f.type === 'image' ? 'text-backed' : 'text-modified']">
-                  <svg
-                    v-if="f.type === 'image'"
-                    width="13"
-                    height="13"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <svg v-else width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-                    <path
-                      d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0013 8v4a1 1 0 001.553.894l3-2a1 1 0 000-1.788l-3-2z"
-                    />
-                  </svg>
-                  {{ f.type.toUpperCase() }}
-                </span>
-              </td>
-              <td class="mono muted">{{ f.sizeStr }}</td>
-              <td class="mono muted">{{ f.modified }}</td>
-              <td><StatusBadge :status="f.status" /></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="table-footer">
-        <span class="footer-info">
-          <span v-if="sel.size > 0" class="selected-count">{{ sel.size }} selected</span>
-          {{ (page - 1) * PER + 1 }}–{{ Math.min(page * PER, filtered.length) }} of
-          {{ filtered.length }}
-        </span>
-        <div class="pagination">
-          <button
-            v-for="p in pages"
-            :key="p"
-            :class="['page-btn', { active: page === p }]"
-            @click="page = p"
-          >
-            {{ p }}
+    <template v-if="scanStore.status === 'scanning'">
+      <DesignCard class="status-panel">
+        <div class="status-body">
+          <span class="status-title">{{ $t('preview.scanning') }}</span>
+          <ProgressBar :value="progressPct ?? 0" :height="8" />
+          <span class="status-sub">
+            {{
+              scanStore.progress.total
+                ? $t('preview.scanned_files', {
+                    scanned: scanStore.progress.scanned,
+                    total: scanStore.progress.total
+                  })
+                : $t('preview.scanned_only', { scanned: scanStore.progress.scanned })
+            }}
+          </span>
+          <span v-if="scanStore.progress.current_file" class="status-current mono-sm">
+            {{ $t('preview.scan_current', { file: scanStore.progress.current_file }) }}
+          </span>
+          <button class="btn-secondary-sm" @click="scanStore.cancel()">
+            {{ $t('common.cancel') }}
           </button>
         </div>
+      </DesignCard>
+    </template>
+
+    <template v-else-if="scanStore.status === 'error'">
+      <DesignCard class="status-panel">
+        <div class="status-body">
+          <span class="status-title text-failed">{{ $t('preview.scan_error') }}</span>
+          <span class="status-sub mono-sm">{{ scanStore.error }}</span>
+          <button class="btn-primary-sm" @click="retry">{{ $t('common.retry') }}</button>
+        </div>
+      </DesignCard>
+    </template>
+
+    <template v-else-if="files.length === 0">
+      <DesignCard class="status-panel">
+        <div class="status-body">
+          <span class="status-title">{{ $t('preview.empty_title') }}</span>
+          <span class="status-sub">{{ $t('preview.empty_hint') }}</span>
+          <button class="btn-secondary-sm" @click="router.push({ name: 'home' })">
+            {{ $t('common.back') }}
+          </button>
+        </div>
+      </DesignCard>
+    </template>
+
+    <template v-else>
+      <div class="filter-tabs">
+        <button
+          v-for="f in ['all', 'new', 'backed_up', 'changed'] as const"
+          :key="f"
+          :class="['filter-tab', { active: filter === f }]"
+          @click="selectFilter(f)"
+        >
+          {{ f === 'all' ? $t('common.all') : $t(`status.${f}`) }}
+          <span v-if="f !== 'all'" class="filter-count">{{
+            counts[f as keyof typeof counts]
+          }}</span>
+        </button>
       </div>
-    </DesignCard>
+
+      <DesignCard style="display: flex; overflow: hidden; flex: 1; flex-direction: column">
+        <div class="table-wrapper">
+          <table class="design-table">
+            <thead>
+              <tr>
+                <th class="th-check">
+                  <input
+                    type="checkbox"
+                    :checked="sel.size === paged.length && paged.length > 0"
+                    @change="toggleAll"
+                  />
+                </th>
+                <th>{{ $t('preview.file_name') }}</th>
+                <th class="th-type">{{ $t('preview.type') }}</th>
+                <th class="th-size">{{ $t('preview.size') }}</th>
+                <th class="th-modified">{{ $t('preview.modified_at') }}</th>
+                <th class="th-status">{{ $t('preview.status') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="f in paged"
+                :key="f.path"
+                :class="['table-row', { selected: sel.has(f.path) }]"
+                @click="toggleFile(f.path)"
+              >
+                <td class="td-check">
+                  <input
+                    type="checkbox"
+                    :checked="sel.has(f.path)"
+                    @click.stop="toggleFile(f.path)"
+                  />
+                </td>
+                <td>
+                  <button class="file-name" @click.stop="openPreview(f)">
+                    {{ f.file_name }}
+                  </button>
+                </td>
+                <td>
+                  <span :class="['file-type', f.is_image ? 'text-backed' : 'text-modified']">
+                    <icon-local-image v-if="f.is_image" />
+                    <icon-local-video v-else />
+                    {{ $t(f.is_image ? 'preview.type_image' : 'preview.type_video') }}
+                  </span>
+                </td>
+                <td class="mono muted">{{ formatBytes(f.file_size) }}</td>
+                <td class="mono muted">{{ formatDateTime(f.modified_at) }}</td>
+                <td><StatusBadge :status="f.status" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-footer">
+          <span class="footer-info">
+            <span v-if="sel.size > 0" class="selected-count">
+              {{ $t('preview.selected', { count: sel.size }) }}
+            </span>
+            {{
+              $t('preview.pagination', {
+                from: (page - 1) * PER + 1,
+                to: Math.min(page * PER, filtered.length),
+                total: filtered.length
+              })
+            }}
+          </span>
+          <div class="pagination">
+            <button class="page-nav" :disabled="page <= 1" @click="goPage(page - 1)"> ‹ </button>
+            <template v-for="(it, i) in pageItems" :key="i">
+              <span v-if="it === 'left' || it === 'right'" class="page-ellipsis">…</span>
+              <button v-else :class="['page-btn', { active: page === it }]" @click="goPage(it)">
+                {{ it }}
+              </button>
+            </template>
+            <button class="page-nav" :disabled="page >= pages" @click="goPage(page + 1)">
+              ›
+            </button>
+          </div>
+        </div>
+      </DesignCard>
+    </template>
+
+    <div v-if="previewing" class="lightbox-backdrop" @click.self="previewing = null">
+      <div class="lightbox">
+        <div class="lightbox-top">
+          <span class="mono-sm">{{ previewing.file_name }}</span>
+          <button class="btn-secondary-sm" @click="previewing = null">✕</button>
+        </div>
+        <div class="lightbox-media">
+          <video
+            v-if="!previewing.is_image"
+            :src="previewSrc"
+            controls
+            autoplay
+            class="lightbox-video"
+          />
+          <img v-else :src="previewSrc" class="lightbox-img" />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -343,9 +377,15 @@ function toggleAll() {
   gap: 6px;
 }
 
+.btn-primary-sm:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+}
+
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
 
@@ -379,6 +419,44 @@ function toggleAll() {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--text-muted);
+}
+
+.status-panel {
+  display: flex;
+  padding: 26px;
+  flex: 1;
+}
+
+.status-body {
+  display: flex;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  flex-direction: column;
+  gap: 12px;
+  justify-content: center;
+}
+
+.status-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.status-sub {
+  font-size: 12px;
+  color: var(--text-sec);
+}
+
+.status-current {
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-failed {
+  color: var(--failed);
 }
 
 .table-wrapper {
@@ -446,6 +524,20 @@ function toggleAll() {
   background: var(--card-hover);
 }
 
+.file-name {
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.file-name:hover {
+  text-decoration: underline;
+}
+
 .mono-sm {
   font-family: var(--mono);
   font-size: 12px;
@@ -492,6 +584,7 @@ function toggleAll() {
 .pagination {
   display: flex;
   gap: 4px;
+  align-items: center;
 }
 
 .page-btn {
@@ -510,5 +603,80 @@ function toggleAll() {
   color: #fff;
   background: var(--accent);
   border-color: var(--accent);
+}
+
+.page-ellipsis {
+  min-width: 20px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.page-nav {
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-sec);
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.page-nav:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  padding: 40px;
+  background: rgb(0 0 0 / 72%);
+  align-items: center;
+  justify-content: center;
+}
+
+.lightbox {
+  display: flex;
+  width: min(920px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  flex-direction: column;
+}
+
+.lightbox-top {
+  display: flex;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.lightbox-media {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+.lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.lightbox-video {
+  width: 100%;
+  max-height: 100%;
 }
 </style>

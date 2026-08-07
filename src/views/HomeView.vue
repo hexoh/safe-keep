@@ -7,6 +7,7 @@ import { countFiles, cancelCount } from '@/api/scan'
 import { homeDir } from '@tauri-apps/api/path'
 import { ElMessage } from 'element-plus'
 import { i18n } from '@/locales'
+import { useScanStore } from '@/stores/scan'
 
 const STATE_KEY = 'safe-keep.last-device'
 const PRESET_KEY = 'safe-keep.last-preset'
@@ -42,7 +43,13 @@ function driveRootOf(path: string): string {
   return best
 }
 
+function mbToBytes(v: string): number | undefined {
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 1024 * 1024) : undefined
+}
+
 const router = useRouter()
+const scanStore = useScanStore()
 const { devices: volumes, refresh, watchDevices } = useDevice()
 
 onMounted(async () => {
@@ -277,6 +284,15 @@ const orgKeys: Record<OrgOpt, string> = {
 function startScan() {
   saveSrcPath()
   saveDstPath()
+  const imagesOn = IMAGE_FORMATS.some((fmt) => fmts[fmt])
+  const videosOn = VIDEO_FORMATS.some((fmt) => fmts[fmt])
+  scanStore.setOptions({
+    source_path: srcPath.value.trim(),
+    include_images: imagesOn,
+    include_videos: videosOn,
+    min_size: mbToBytes(minSz.value),
+    max_size: mbToBytes(maxSz.value)
+  })
   router.push({ name: 'preview' })
 }
 
