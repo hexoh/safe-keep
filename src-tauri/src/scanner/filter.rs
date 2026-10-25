@@ -1,10 +1,13 @@
 use std::path::Path;
 
 const IMAGE_EXTENSIONS: &[&str] = &[
-  "jpg", "jpeg", "png", "heic", "heif", "webp", "gif", "bmp", "tiff", "raw", "arw", "cr2", "nef",
+  "jpg", "jpeg", "png", "heic", "heif", "webp", "gif", "bmp", "tiff", "raw", "dng", "avif", "arw",
+  "cr2", "nef",
 ];
 
-const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "avi", "mkv", "mts", "m2ts"];
+const VIDEO_EXTENSIONS: &[&str] = &[
+  "mp4", "mov", "avi", "mkv", "mts", "m2ts", "m4v", "webm", "3gp",
+];
 
 pub fn is_supported_file(path: &Path) -> bool {
   path

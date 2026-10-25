@@ -42,6 +42,7 @@ impl FileCopier {
     let failed_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let errors = Arc::new(std::sync::Mutex::new(Vec::new()));
     let failed_files = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let succeeded_files = Arc::new(std::sync::Mutex::new(Vec::new()));
 
     let (tx, rx) = mpsc::channel::<(u64, u64, String, f64)>();
 
@@ -81,6 +82,7 @@ impl FileCopier {
       let failed_count = failed_count.clone();
       let errors = errors.clone();
       let failed_files = failed_files.clone();
+      let succeeded_files = succeeded_files.clone();
       let tx = tx.clone();
       let file_index = file_index.clone();
       let work_done = work_done.clone();
@@ -133,6 +135,7 @@ impl FileCopier {
           match action {
             super::conflict::ConflictAction::Skip => {
               // 文件已存在且策略为跳过
+              succeeded_files.lock().unwrap().push(file.relative_path.clone());
               let _ = tx.send((
                 completed_files.fetch_add(1, Ordering::SeqCst) + 1,
                 copied_bytes.fetch_add(file.file_size, Ordering::SeqCst) + file.file_size,
@@ -149,6 +152,7 @@ impl FileCopier {
             Ok(bytes_copied) => {
               let completed = completed_files.fetch_add(1, Ordering::SeqCst) + 1;
               let total_copied = copied_bytes.fetch_add(bytes_copied, Ordering::SeqCst) + bytes_copied;
+              succeeded_files.lock().unwrap().push(file.relative_path.clone());
               let _ = tx.send((
                 completed,
                 total_copied,
@@ -196,6 +200,7 @@ impl FileCopier {
 
     let error_list = errors.lock().unwrap().clone();
     let failed_list = failed_files.lock().unwrap().clone();
+    let succeeded_list = succeeded_files.lock().unwrap().clone();
 
     Ok(BackupResult {
       total_files,
@@ -207,6 +212,7 @@ impl FileCopier {
       avg_speed_mbps: avg_speed,
       errors: error_list,
       failed_files: failed_list,
+      succeeded_files: succeeded_list,
     })
   }
 }
@@ -218,7 +224,9 @@ fn copy_file(
   paused: &AtomicBool,
 ) -> Result<u64, String> {
   let mut src_file = fs::File::open(src).map_err(|e| e.to_string())?;
-  let _src_len = src_file.metadata().map_err(|e| e.to_string())?.len();
+  let src_meta = src_file.metadata().map_err(|e| e.to_string())?;
+  let _src_len = src_meta.len();
+  let src_modified = src_meta.modified().ok();
 
   let mut dest_file = fs::File::create(dest).map_err(|e| e.to_string())?;
 
@@ -239,6 +247,11 @@ fn copy_file(
     }
     dest_file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
     total_read += n as u64;
+  }
+
+  // 保留源文件修改时间，清理前的完整性校验依赖它。
+  if let Some(modified) = src_modified {
+    let _ = dest_file.set_modified(modified);
   }
 
   Ok(total_read)

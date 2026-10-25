@@ -25,6 +25,7 @@ impl CleanupState {
 pub struct CleanupFilter {
   pub source_root: String,
   pub before_days: Option<u64>,
+  pub before_date: Option<String>,
   pub is_image: Option<bool>,
   pub min_size: Option<i64>,
   pub max_size: Option<i64>,
@@ -41,6 +42,7 @@ pub async fn dry_run_cleanup(
     &conn,
     &filter.source_root,
     filter.before_days,
+    filter.before_date.as_deref(),
     filter.is_image,
     filter.min_size,
     filter.max_size,

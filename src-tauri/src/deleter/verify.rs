@@ -31,7 +31,8 @@ pub fn verify_backup_integrity(source: &Path, dest: &Path) -> Result<bool, Strin
     .map(|d| d.as_secs() as i64)
     .unwrap_or(0);
 
-  if src_mtime != dst_mtime {
+  // FAT32 / exFAT 的时间戳精度通常为 2 秒，允许少量误差。
+  if (src_mtime - dst_mtime).abs() > 2 {
     return Ok(false);
   }
 

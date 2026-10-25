@@ -5,20 +5,26 @@ const checking = ref(false)
 const updateAvailable = ref(false)
 const updateVersion = ref('')
 const updateBody = ref('')
+const updateError = ref<string | null>(null)
 const downloading = ref(false)
 const downloadProgress = ref(0)
 
 async function checkForUpdates() {
   checking.value = true
+  updateError.value = null
   try {
     const update = await check()
     if (update) {
       updateAvailable.value = true
       updateVersion.value = update.version
       updateBody.value = update.body ?? ''
+    } else {
+      updateAvailable.value = false
+      updateVersion.value = ''
+      updateBody.value = ''
     }
-  } catch {
-    // silent fail
+  } catch (e: any) {
+    updateError.value = typeof e === 'string' ? e : (e?.message ?? 'Unknown error')
   } finally {
     checking.value = false
   }
@@ -46,6 +52,7 @@ export function useUpdater() {
     updateAvailable,
     updateVersion,
     updateBody,
+    updateError,
     downloading,
     downloadProgress,
     checkForUpdates,

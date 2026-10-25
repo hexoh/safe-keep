@@ -24,6 +24,7 @@ pub fn restore_files(
   let mut failed = 0u64;
   let mut restored_bytes = 0u64;
   let mut errors = Vec::new();
+  let mut succeeded_file_ids = Vec::new();
 
   for file in &files {
     if cancel.load(Ordering::SeqCst) {
@@ -48,6 +49,7 @@ pub fn restore_files(
     match action {
       super::conflict::ConflictAction::Skip => {
         succeeded += 1;
+        succeeded_file_ids.push(file.file_id);
         on_progress(total_files, succeeded + failed, succeeded, failed, &file.file_name);
         continue;
       }
@@ -57,6 +59,7 @@ pub fn restore_files(
     match copy_file(src, &resolved_dest, &cancel) {
       Ok(bytes) => {
         succeeded += 1;
+        succeeded_file_ids.push(file.file_id);
         restored_bytes += bytes;
       }
       Err(e) => {
@@ -79,6 +82,7 @@ pub fn restore_files(
     restored_bytes,
     duration_secs: duration,
     errors,
+    succeeded_file_ids,
   }
 }
 

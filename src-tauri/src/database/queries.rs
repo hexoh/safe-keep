@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection};
 
-use super::models::{BackupHistoryEntry, FileRecord};
+use super::models::{BackupHistoryEntry, BackupTask, FileRecord};
 use crate::deleter::CleanupFile;
 
 pub fn get_files_by_source(
@@ -84,6 +84,7 @@ pub fn get_cleanup_candidates(
   conn: &Connection,
   source_root: &str,
   before_days: Option<u64>,
+  before_date: Option<&str>,
   is_image: Option<bool>,
   min_size: Option<i64>,
   max_size: Option<i64>,
@@ -98,20 +99,28 @@ pub fn get_cleanup_candidates(
   if before_days.is_some() {
     sql.push_str(" AND backed_up_at IS NOT NULL AND julianday('now') - julianday(backed_up_at) > ?2");
   }
+  if before_date.is_some() {
+    sql.push_str(" AND backed_up_at IS NOT NULL AND date(backed_up_at) < date(?5)");
+  }
   if let Some(img) = is_image {
     if img {
       sql.push_str(
         " AND (LOWER(file_name) LIKE '%.jpg' OR LOWER(file_name) LIKE '%.jpeg'
               OR LOWER(file_name) LIKE '%.png' OR LOWER(file_name) LIKE '%.heic'
-              OR LOWER(file_name) LIKE '%.webp' OR LOWER(file_name) LIKE '%.gif'
-              OR LOWER(file_name) LIKE '%.bmp' OR LOWER(file_name) LIKE '%.tiff'
-              OR LOWER(file_name) LIKE '%.raw')",
+              OR LOWER(file_name) LIKE '%.heif' OR LOWER(file_name) LIKE '%.webp'
+              OR LOWER(file_name) LIKE '%.gif' OR LOWER(file_name) LIKE '%.bmp'
+              OR LOWER(file_name) LIKE '%.tiff' OR LOWER(file_name) LIKE '%.raw'
+              OR LOWER(file_name) LIKE '%.dng' OR LOWER(file_name) LIKE '%.avif'
+              OR LOWER(file_name) LIKE '%.arw' OR LOWER(file_name) LIKE '%.cr2'
+              OR LOWER(file_name) LIKE '%.nef')",
       );
     } else {
       sql.push_str(
         " AND (LOWER(file_name) LIKE '%.mp4' OR LOWER(file_name) LIKE '%.mov'
               OR LOWER(file_name) LIKE '%.avi' OR LOWER(file_name) LIKE '%.mkv'
-              OR LOWER(file_name) LIKE '%.mts' OR LOWER(file_name) LIKE '%.m2ts')",
+              OR LOWER(file_name) LIKE '%.m4v' OR LOWER(file_name) LIKE '%.webm'
+              OR LOWER(file_name) LIKE '%.3gp' OR LOWER(file_name) LIKE '%.mts'
+              OR LOWER(file_name) LIKE '%.m2ts')",
       );
     }
   }
@@ -131,6 +140,7 @@ pub fn get_cleanup_candidates(
         before_days.unwrap_or(0) as i64,
         min_size.unwrap_or(0),
         max_size.unwrap_or(i64::MAX),
+        before_date,
       ],
       |row| {
         Ok(CleanupFile {
@@ -189,6 +199,44 @@ pub fn get_backup_history(conn: &Connection) -> Result<Vec<BackupHistoryEntry>, 
     entries.push(record.map_err(|e| e.to_string())?);
   }
   Ok(entries)
+}
+
+/// 获取备份任务列表（按时间倒序）
+pub fn get_backup_tasks(conn: &Connection) -> Result<Vec<BackupTask>, String> {
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, source_root, dest_path, total_files, total_bytes,
+              backed_up_files, backed_up_bytes, failed_files, status,
+              started_at, completed_at, avg_speed
+       FROM backup_tasks
+       ORDER BY id DESC",
+    )
+    .map_err(|e| e.to_string())?;
+
+  let records = stmt
+    .query_map([], |row| {
+      Ok(BackupTask {
+        id: row.get(0)?,
+        source_root: row.get(1)?,
+        dest_path: row.get(2)?,
+        total_files: row.get(3)?,
+        total_bytes: row.get(4)?,
+        backed_up_files: row.get(5)?,
+        backed_up_bytes: row.get(6)?,
+        failed_files: row.get(7)?,
+        status: row.get(8)?,
+        started_at: row.get(9)?,
+        completed_at: row.get(10)?,
+        avg_speed: row.get(11)?,
+      })
+    })
+    .map_err(|e| e.to_string())?;
+
+  let mut tasks = Vec::new();
+  for record in records {
+    tasks.push(record.map_err(|e| e.to_string())?);
+  }
+  Ok(tasks)
 }
 
 /// 获取单条设置

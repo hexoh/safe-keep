@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { ElMessage } from 'element-plus'
 import { useScanStore } from '@/stores/scan'
 import { formatBytes, formatDateTime } from '@/utils/format'
+import { i18n } from '@/locales'
 import type { FileEntry } from '@/types/file'
 
 const router = useRouter()
@@ -26,6 +28,23 @@ const filter = ref<FilterKey>('all')
 const PER = 7
 
 const files = computed(() => scanStore.files)
+const selectionInitialized = ref(false)
+
+function selectable(f: FileEntry): boolean {
+  return f.status === 'new' || f.status === 'changed'
+}
+
+// 默认勾选所有新增 / 已变更文件，已备份文件不重复复制
+watch(
+  () => [scanStore.status, scanStore.files] as const,
+  ([status, list]) => {
+    if (status === 'done' && !selectionInitialized.value) {
+      sel.value = new Set(list.filter(selectable).map((f) => f.path))
+      selectionInitialized.value = true
+    }
+  },
+  { immediate: true }
+)
 
 const filtered = computed(() => {
   if (filter.value === 'all') return files.value
@@ -87,13 +106,23 @@ function toggleFile(path: string) {
 }
 
 function toggleAll() {
-  sel.value =
-    sel.value.size === paged.value.length && paged.value.length > 0
-      ? new Set()
-      : new Set(paged.value.map((f) => f.path))
+  const allSelected =
+    filtered.value.length > 0 && filtered.value.every((f) => sel.value.has(f.path))
+  sel.value = allSelected ? new Set() : new Set(filtered.value.map((f) => f.path))
+}
+
+function startBackup() {
+  const selected = files.value.filter((f) => sel.value.has(f.path))
+  if (selected.length === 0) {
+    ElMessage.warning(i18n.global.t('preview.no_selection'))
+    return
+  }
+  scanStore.requestBackup(selected.map((f) => f.path))
+  router.push({ name: 'backup' })
 }
 
 function retry() {
+  selectionInitialized.value = false
   if (scanStore.options) void scanStore.beginScan(scanStore.options)
 }
 
@@ -118,11 +147,11 @@ function openPreview(f: FileEntry) {
         </button>
         <button
           class="btn-primary-sm"
-          :disabled="scanStore.status !== 'done' || files.length === 0"
-          @click="router.push({ name: 'backup' })"
+          :disabled="scanStore.status !== 'done' || sel.size === 0"
+          @click="startBackup"
         >
           <icon-local-upload />
-          {{ $t('preview.start_backup') }} · {{ counts.new + counts.changed }}
+          {{ $t('preview.start_backup') }} · {{ sel.size }}
           {{ $t('preview.files') }}
         </button>
       </div>
@@ -224,7 +253,7 @@ function openPreview(f: FileEntry) {
                 <th class="th-check">
                   <input
                     type="checkbox"
-                    :checked="sel.size === paged.length && paged.length > 0"
+                    :checked="filtered.length > 0 && filtered.every((f) => sel.has(f.path))"
                     @change="toggleAll"
                   />
                 </th>

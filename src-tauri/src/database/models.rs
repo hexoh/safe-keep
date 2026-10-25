@@ -11,6 +11,22 @@ pub struct BackupHistoryEntry {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct BackupTask {
+    pub id: i64,
+    pub source_root: String,
+    pub dest_path: String,
+    pub total_files: i64,
+    pub total_bytes: i64,
+    pub backed_up_files: i64,
+    pub backed_up_bytes: i64,
+    pub failed_files: i64,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub avg_speed: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct FileRecord {
   pub id: i64,
   pub source_root: String,

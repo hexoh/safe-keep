@@ -86,6 +86,8 @@ impl FileScanner {
             | "bmp"
             | "tiff"
             | "raw"
+            | "dng"
+            | "avif"
             | "arw"
             | "cr2"
             | "nef"

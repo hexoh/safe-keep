@@ -24,6 +24,7 @@ export interface ScanResult {
 
 export interface ScanOptions {
   source_path: string
+  dest_path?: string
   include_images?: boolean
   include_videos?: boolean
   min_size?: number

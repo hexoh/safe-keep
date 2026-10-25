@@ -30,4 +30,7 @@ pub struct BackupResult {
   pub avg_speed_mbps: f64,
   pub errors: Vec<String>,
   pub failed_files: Vec<FailedFile>,
+  /// 成功复制的相对路径，仅用于后端更新数据库。
+  #[serde(skip)]
+  pub succeeded_files: Vec<String>,
 }

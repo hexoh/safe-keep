@@ -1,240 +1,361 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { useScanStore } from '@/stores/scan'
+import { useBackup } from '@/composables/useBackup'
+import { useSettings } from '@/composables/useSettings'
+import { formatBytes, formatDuration } from '@/utils/format'
+import type { StartBackupOptions } from '@/api/backup'
 
 const router = useRouter()
-const status = ref<'running' | 'paused' | 'done'>('running')
-const overallPct = ref(0)
-const filePct = ref(0)
-const fileIdx = ref(0)
-const logs = ref([
-  '[14:23:01] Starting backup session — 9 files, 527.8 MB',
-  '[14:23:01] ✓ Output directory ready: /Users/zhao/Pictures/SafeKeep/2024/03/',
-  '[14:23:02] → Copying VID_20240315_091022.mp4  (128.5 MB)'
-])
+const scanStore = useScanStore()
+const { settings, load } = useSettings()
+const { running, paused, progress, result, logs, error, start, pause, resume, cancel } = useBackup()
+
+const started = ref(false)
+const cancelling = ref(false)
+const cancelledByUser = ref(false)
 const logRef = ref<HTMLDivElement | null>(null)
 
-const mockFiles = [
-  { name: 'VID_20240315_091022.mp4', sizeStr: '128.5 MB', type: 'video' as const },
-  { name: 'VID_20240313_221045.mov', sizeStr: '256.3 MB', type: 'video' as const },
-  { name: 'IMG_20240315_142301.jpg', sizeStr: '4.1 MB', type: 'image' as const }
-]
+const files = computed(() => {
+  const selected = new Set(scanStore.selectedPaths)
+  return scanStore.files.filter((f) => selected.has(f.path))
+})
 
-const cur = computed(() => mockFiles[Math.min(fileIdx.value, mockFiles.length - 1)])
-const speed = computed(() =>
-  status.value === 'running' ? (42.8 + Math.sin(Date.now() / 900) * 6).toFixed(1) : '0.0'
+const sourceRoot = computed(() => scanStore.options?.source_path ?? '')
+const destPath = computed(() => scanStore.options?.dest_path ?? '')
+const totalSize = computed(() => files.value.reduce((sum, f) => sum + f.file_size, 0))
+
+const canStart = computed(
+  () => !started.value && files.value.length > 0 && !!sourceRoot.value && !!destPath.value
 )
-const done = computed(() => Math.min(fileIdx.value, mockFiles.length))
 
-let intervalId: ReturnType<typeof setInterval> | null = null
+type Phase = 'ready' | 'running' | 'paused' | 'done' | 'cancelled' | 'error'
 
-function advanceFile() {
-  const nextIdx = fileIdx.value + 1
-  fileIdx.value = nextIdx
-  const increment = Math.floor(100 / mockFiles.length)
-  overallPct.value = Math.min(100, overallPct.value + increment)
-  filePct.value = 0
+const phase = computed<Phase>(() => {
+  if (error.value) return 'error'
+  if (result.value) return cancelledByUser.value ? 'cancelled' : 'done'
+  if (paused.value) return 'paused'
+  if (running.value) return 'running'
+  if (started.value && cancelling.value) return 'cancelled'
+  if (started.value) return 'running'
+  return 'ready'
+})
 
-  if (nextIdx >= mockFiles.length || overallPct.value >= 100) {
-    status.value = 'done'
-    overallPct.value = 100
-    logs.value = [
-      ...logs.value,
-      '[14:26:25] ✓ Backup complete — 9 files, 527.8 MB transferred in 3m 24s'
-    ]
-    if (intervalId) clearInterval(intervalId)
-    return
+const titleKey = computed(
+  () =>
+    ({
+      ready: 'backup.title',
+      running: 'backup.running_title',
+      paused: 'backup.paused_title',
+      done: 'backup.done_title',
+      cancelled: 'backup.cancelled_title',
+      error: 'backup.failed_title'
+    })[phase.value]
+)
+
+function progressPct(): number {
+  const p = progress.value
+  if (!p) return 0
+  if (p.total_bytes > 0) {
+    return Math.min(100, Math.round((p.copied_bytes / p.total_bytes) * 100))
   }
-
-  const nf = mockFiles[nextIdx]
-  if (nf) {
-    logs.value = [
-      ...logs.value.slice(-30),
-      `[14:${23 + nextIdx}:${String((nextIdx * 7) % 60).padStart(2, '0')}] → Copying ${nf.name}  (${nf.sizeStr})`
-    ]
+  if (p.total_files > 0) {
+    return Math.round((p.completed_files / p.total_files) * 100)
   }
+  return 0
 }
 
-function tick() {
-  if (status.value !== 'running') return
-  const next = filePct.value + 3
-  if (next >= 100) {
-    filePct.value = 100
-    advanceFile()
-  } else {
-    filePct.value = next
+const overallPct = computed(() => {
+  if (result.value && !cancelledByUser.value) return 100
+  return progressPct()
+})
+
+const filePct = computed(() => Math.round((progress.value?.current_file_progress ?? 0) * 100))
+const speed = computed(() => progress.value?.speed_mbps ?? result.value?.avg_speed_mbps ?? 0)
+const doneCount = computed(() => progress.value?.completed_files ?? result.value?.succeeded ?? 0)
+const totalCount = computed(() => progress.value?.total_files ?? files.value.length)
+const copiedBytes = computed(() => progress.value?.copied_bytes ?? result.value?.copied_bytes ?? 0)
+const totalBytes = computed(
+  () => progress.value?.total_bytes ?? result.value?.total_bytes ?? totalSize.value
+)
+const eta = computed(() => progress.value?.remaining_secs ?? null)
+const currentFile = computed(() => progress.value?.current_file ?? '')
+const duration = computed(() => result.value?.duration_secs ?? 0)
+
+async function begin() {
+  if (files.value.length === 0) return
+  started.value = true
+  cancelling.value = false
+  cancelledByUser.value = false
+
+  await load()
+
+  const options: StartBackupOptions = {
+    sourceRoot: sourceRoot.value,
+    destPath: destPath.value,
+    files: files.value.map((f) => ({
+      source_path: f.path,
+      relative_path: f.relative_path,
+      file_size: f.file_size
+    })),
+    conflictStrategy: settings.value.conflict_strategy,
+    concurrency: settings.value.concurrent_threads
   }
+
+  await start(options)
+}
+
+async function togglePause() {
+  if (paused.value) await resume()
+  else await pause()
+}
+
+async function cancelBackup() {
+  cancelledByUser.value = true
+  cancelling.value = true
+  await cancel()
+}
+
+function clearLogs() {
+  logs.value = []
+}
+
+function retry() {
+  error.value = null
+  result.value = null
+  progress.value = null
+  started.value = false
+  cancelling.value = false
+  cancelledByUser.value = false
+  void begin()
 }
 
 onMounted(() => {
-  intervalId = setInterval(tick, 90)
+  if (scanStore.consumeBackupRequest()) void begin()
 })
 
-onUnmounted(() => {
-  if (intervalId) clearInterval(intervalId)
-})
-
-watch(logs, () => {
-  nextTick(() => {
-    if (logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight
-  })
-})
+watch(
+  logs,
+  () => {
+    nextTick(() => {
+      if (logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight
+    })
+  },
+  { deep: true }
+)
 </script>
 
 <template>
   <div class="backup-view">
     <div class="page-header">
       <div>
-        <h1 :class="{ 'text-new': status === 'done' }">
-          {{
-            status === 'done'
-              ? '✓ Backup Complete'
-              : status === 'paused'
-                ? '⏸ Paused'
-                : 'Backup Running'
-          }}
+        <h1 :class="{ 'text-new': phase === 'done', 'text-failed': phase === 'error' }">
+          {{ $t(titleKey) }}
         </h1>
-        <p class="route-mono">iPhone 15 Pro → /Users/zhao/Pictures/SafeKeep</p>
+        <p class="route-mono">
+          {{ sourceRoot || $t('common.not_selected') }} →
+          {{ destPath || $t('common.not_selected') }}
+        </p>
       </div>
       <div class="header-actions">
-        <template v-if="status !== 'done'">
-          <button class="btn-outline" @click="status = status === 'paused' ? 'running' : 'paused'">
-            <svg
-              v-if="status === 'paused'"
-              width="14"
-              height="14"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fillRule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <svg v-else width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"
-                clipRule="evenodd"
-              />
-            </svg>
-            {{ status === 'paused' ? 'Resume' : 'Pause' }}
+        <template v-if="phase === 'running' || phase === 'paused'">
+          <button class="btn-outline" @click="togglePause">
+            {{ paused ? $t('backup.resume') : $t('backup.pause') }}
           </button>
-          <button class="btn-danger-outline">
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Cancel
+          <button class="btn-danger-outline" @click="cancelBackup">
+            {{ $t('backup.cancel') }}
           </button>
         </template>
-        <button v-else class="btn-primary-sm" @click="router.push({ name: 'history' })">
-          View History →
-        </button>
+        <template v-else-if="phase === 'done' || phase === 'cancelled'">
+          <button class="btn-secondary-sm" @click="router.push({ name: 'preview' })">
+            {{ $t('backup.back_to_preview') }}
+          </button>
+          <button class="btn-primary-sm" @click="router.push({ name: 'history' })">
+            {{ $t('backup.view_details') }}
+          </button>
+        </template>
+        <template v-else-if="phase === 'error'">
+          <button class="btn-secondary-sm" @click="router.push({ name: 'preview' })">
+            {{ $t('common.back') }}
+          </button>
+          <button class="btn-primary-sm" @click="retry">{{ $t('common.retry') }}</button>
+        </template>
       </div>
     </div>
 
-    <!-- Global progress -->
-    <DesignCard padding="20px">
-      <div class="progress-section">
-        <div class="progress-header">
-          <span class="progress-title">Overall Progress</span>
-          <span :class="['progress-pct', { 'text-new': status === 'done' }]">
-            {{ overallPct }}%
-          </span>
-        </div>
-        <ProgressBar
-          :value="overallPct"
-          :color="status === 'done' ? 'var(--new)' : 'var(--accent)'"
-          :height="10"
-        />
-        <div class="speed-grid">
-          <div
-            v-for="s in [
-              { lbl: 'Transfer Speed', val: `${speed} MB/s`, c: 'var(--accent)' },
-              { lbl: 'Transferred', val: `${(overallPct * 5.27).toFixed(0)} MB`, c: 'var(--text)' },
-              { lbl: 'Files Done', val: `${done} / ${mockFiles.length}`, c: 'var(--text)' },
-              {
-                lbl: 'ETA',
-                val:
-                  status === 'done'
-                    ? 'Complete'
-                    : `${Math.max(0, Math.ceil(((100 - overallPct) / (100 / mockFiles.length)) * 0.09 * 60))}s`,
-                c: status === 'done' ? 'var(--new)' : 'var(--modified)'
-              }
-            ]"
-            :key="s.lbl"
-            class="speed-item"
-          >
-            <DesignLabel :text="s.lbl" />
-            <span class="speed-val" :style="{ color: s.c }">{{ s.val }}</span>
+    <!-- No files selected -->
+    <DesignCard v-if="files.length === 0" class="status-panel">
+      <div class="status-body">
+        <span class="status-title">{{ $t('backup.no_files_title') }}</span>
+        <span class="status-sub">{{ $t('backup.no_files_hint') }}</span>
+        <button class="btn-primary-sm" @click="router.push({ name: 'preview' })">
+          {{ $t('backup.back_to_preview') }}
+        </button>
+      </div>
+    </DesignCard>
+
+    <!-- Ready to start (direct navigation) -->
+    <DesignCard v-else-if="!started" class="status-panel">
+      <div class="status-body">
+        <span class="status-title">{{ $t('backup.title') }}</span>
+        <span class="status-sub">
+          {{ $t('backup.ready_hint', { files: files.length, size: formatBytes(totalSize) }) }}
+        </span>
+        <button class="btn-primary-sm" :disabled="!canStart" @click="begin">
+          {{ $t('preview.start_backup') }}
+        </button>
+      </div>
+    </DesignCard>
+
+    <template v-else>
+      <!-- Error -->
+      <DesignCard v-if="phase === 'error'" class="status-panel">
+        <div class="status-body">
+          <span class="status-title text-failed">{{ $t('backup.failed_title') }}</span>
+          <span class="status-sub mono-sm">{{ error }}</span>
+          <div class="status-actions">
+            <button class="btn-secondary-sm" @click="router.push({ name: 'preview' })">
+              {{ $t('common.back') }}
+            </button>
+            <button class="btn-primary-sm" @click="retry">{{ $t('common.retry') }}</button>
           </div>
         </div>
-      </div>
-    </DesignCard>
+      </DesignCard>
 
-    <!-- Current file -->
-    <DesignCard v-if="status !== 'done' && cur" padding="14px">
-      <div class="current-file-header">
-        <div class="file-info">
-          <span :class="['file-icon', cur.type === 'video' ? 'text-modified' : 'text-backed']">
-            <svg
-              v-if="cur.type === 'video'"
-              width="13"
-              height="13"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0013 8v4a1 1 0 001.553.894l3-2a1 1 0 000-1.788l-3-2z"
-              />
-            </svg>
-            <svg v-else width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </span>
-          <span class="file-name">{{ cur.name }}</span>
-          <span class="file-size">{{ cur.sizeStr }}</span>
-        </div>
-        <span class="file-pct">{{ filePct }}%</span>
-      </div>
-      <ProgressBar :value="filePct" :height="3" />
-    </DesignCard>
+      <template v-else>
+        <!-- Global progress -->
+        <DesignCard padding="20px">
+          <div class="progress-section">
+            <div class="progress-header">
+              <span class="progress-title">{{ $t('backup.overall_progress') }}</span>
+              <span :class="['progress-pct', { 'text-new': phase === 'done' }]">
+                {{ overallPct }}%
+              </span>
+            </div>
+            <ProgressBar
+              :value="overallPct"
+              :color="phase === 'done' ? 'var(--new)' : 'var(--accent)'"
+              :height="10"
+            />
+            <div class="speed-grid">
+              <div class="speed-item">
+                <DesignLabel :text="$t('backup.transfer_speed')" />
+                <span class="speed-val" style="color: var(--accent)">
+                  {{ speed.toFixed(1) }} MB/s
+                </span>
+              </div>
+              <div class="speed-item">
+                <DesignLabel :text="$t('backup.transferred')" />
+                <span class="speed-val">
+                  {{ formatBytes(copiedBytes) }} / {{ formatBytes(totalBytes) }}
+                </span>
+              </div>
+              <div class="speed-item">
+                <DesignLabel :text="$t('backup.files_done')" />
+                <span class="speed-val">{{ doneCount }} / {{ totalCount }}</span>
+              </div>
+              <div class="speed-item">
+                <DesignLabel :text="$t('backup.eta')" />
+                <span
+                  class="speed-val"
+                  :style="{ color: phase === 'done' ? 'var(--new)' : 'var(--modified)' }"
+                >
+                  {{
+                    phase === 'done'
+                      ? $t('backup.complete_short')
+                      : eta != null
+                        ? formatDuration(eta)
+                        : $t('backup.eta_unknown')
+                  }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </DesignCard>
 
-    <!-- Log -->
-    <DesignCard
-      style="display: flex; min-height: 0; overflow: hidden; flex: 1; flex-direction: column"
-    >
-      <div class="log-header">
-        <DesignLabel text="Live Log" />
-        <div class="log-header-right">
-          <span v-if="status === 'running'" class="live-indicator">
-            <span class="live-dot" />
-            LIVE
-          </span>
-          <button class="clear-btn">Clear</button>
-        </div>
-      </div>
-      <div ref="logRef" class="log-content">
-        <div
-          v-for="(line, i) in logs"
-          :key="i"
-          :class="[
-            'log-line',
-            { 'log-success': line.includes('✓'), 'log-transfer': line.includes('→') }
-          ]"
+        <!-- Current file -->
+        <DesignCard v-if="phase === 'running' || phase === 'paused'" padding="14px">
+          <div class="current-file-header">
+            <div class="file-info">
+              <span class="file-name">{{ currentFile || $t('backup.waiting') }}</span>
+              <span v-if="filePct > 0" class="file-pct">{{ filePct }}%</span>
+            </div>
+            <span v-if="paused" class="paused-badge">{{ $t('backup.paused_title') }}</span>
+          </div>
+          <ProgressBar :value="filePct" :height="3" />
+        </DesignCard>
+
+        <!-- Completion -->
+        <DesignCard v-if="phase === 'done' || phase === 'cancelled'" padding="18px">
+          <div class="summary-header">
+            <DesignLabel
+              :text="phase === 'done' ? $t('backup.completed') : $t('backup.cancelled_title')"
+            />
+            <span class="summary-state" :class="phase === 'done' ? 'text-new' : 'text-modified'">
+              {{ phase === 'done' ? $t('status.success') : $t('backup.cancelled_hint') }}
+            </span>
+          </div>
+          <div class="summary-grid">
+            <div class="summary-item">
+              <span class="summary-label">{{ $t('backup.success_count') }}</span>
+              <span class="summary-value text-new">{{ result?.succeeded ?? 0 }}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">{{ $t('backup.failed_count') }}</span>
+              <span class="summary-value text-failed">{{ result?.failed ?? 0 }}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">{{ $t('backup.duration') }}</span>
+              <span class="summary-value">{{ formatDuration(duration) }}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">{{ $t('backup.avg_speed') }}</span>
+              <span class="summary-value">{{ speed.toFixed(1) }} MB/s</span>
+            </div>
+          </div>
+          <div v-if="result?.errors?.length" class="error-list">
+            <div class="error-title">{{ $t('backup.error_title') }}</div>
+            <div v-for="(message, i) in result.errors.slice(0, 5)" :key="i" class="error-line">
+              {{ message }}
+            </div>
+          </div>
+        </DesignCard>
+
+        <!-- Log -->
+        <DesignCard
+          style="display: flex; min-height: 0; overflow: hidden; flex: 1; flex-direction: column"
         >
-          {{ line }}
-        </div>
-      </div>
-    </DesignCard>
+          <div class="log-header">
+            <DesignLabel :text="$t('backup.live_log')" />
+            <div class="log-header-right">
+              <span v-if="running && !paused" class="live-indicator">
+                <span class="live-dot" />
+                {{ $t('backup.live') }}
+              </span>
+              <button class="clear-btn" @click="clearLogs">{{ $t('backup.clear_log') }}</button>
+            </div>
+          </div>
+          <div ref="logRef" class="log-content">
+            <div v-if="logs.length === 0" class="log-line muted">
+              {{ $t('backup.log_empty') }}
+            </div>
+            <div
+              v-for="(line, i) in logs"
+              :key="i"
+              :class="[
+                'log-line',
+                {
+                  'log-success': line.includes('✓') || line.includes('complete'),
+                  'log-transfer': line.includes('→') || line.includes('Copying')
+                }
+              ]"
+            >
+              {{ line }}
+            </div>
+          </div>
+        </DesignCard>
+      </template>
+    </template>
   </div>
 </template>
 
@@ -264,11 +385,22 @@ watch(logs, () => {
   color: var(--new);
 }
 
+.text-failed {
+  color: var(--failed);
+}
+
+.text-modified {
+  color: var(--modified);
+}
+
 .route-mono {
   margin: 3px 0 0;
+  overflow: hidden;
   font-family: var(--mono);
   font-size: 12px;
   color: var(--text-sec);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-actions {
@@ -276,7 +408,8 @@ watch(logs, () => {
   gap: 7px;
 }
 
-.btn-outline {
+.btn-outline,
+.btn-secondary-sm {
   display: flex;
   padding: 7px 14px;
   font-size: 12px;
@@ -288,6 +421,10 @@ watch(logs, () => {
   border-radius: 7px;
   align-items: center;
   gap: 5px;
+}
+
+.btn-secondary-sm {
+  color: var(--text-sec);
 }
 
 .btn-danger-outline {
@@ -313,6 +450,11 @@ watch(logs, () => {
   background: var(--accent);
   border: none;
   border-radius: 7px;
+}
+
+.btn-primary-sm:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .progress-section {
@@ -359,9 +501,10 @@ watch(logs, () => {
 
 .speed-val {
   font-family: var(--mono);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  color: var(--text);
 }
 
 .current-file-header {
@@ -373,25 +516,19 @@ watch(logs, () => {
 
 .file-info {
   display: flex;
+  min-width: 0;
   align-items: center;
-  gap: 7px;
-}
-
-.file-icon {
-  display: flex;
+  gap: 8px;
 }
 
 .file-name {
+  overflow: hidden;
   font-family: var(--mono);
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
-}
-
-.file-size {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-pct {
@@ -400,12 +537,106 @@ watch(logs, () => {
   color: var(--text-sec);
 }
 
-.text-backed {
-  color: var(--backed);
+.paused-badge {
+  font-size: 11px;
+  color: var(--modified);
 }
 
-.text-modified {
-  color: var(--modified);
+.summary-header {
+  display: flex;
+  margin-bottom: 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.summary-state {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.summary-item {
+  display: flex;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.summary-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-sec);
+  text-transform: uppercase;
+}
+
+.summary-value {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.error-list {
+  padding: 10px 12px;
+  margin-top: 12px;
+  background: var(--failed-bg);
+  border: 1px solid rgb(239 68 68 / 25%);
+  border-radius: 7px;
+}
+
+.error-title {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--failed);
+}
+
+.error-line {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-sec);
+}
+
+.status-panel {
+  display: flex;
+  padding: 26px;
+  flex: 1;
+}
+
+.status-body {
+  display: flex;
+  width: 100%;
+  max-width: 580px;
+  margin: 0 auto;
+  flex-direction: column;
+  gap: 12px;
+  justify-content: center;
+}
+
+.status-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.status-sub {
+  font-size: 12px;
+  color: var(--text-sec);
+}
+
+.status-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .log-header {
@@ -468,5 +699,14 @@ watch(logs, () => {
 
 .log-transfer {
   color: var(--text);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.mono-sm {
+  font-family: var(--mono);
+  font-size: 12px;
 }
 </style>

@@ -35,6 +35,7 @@ export interface CleanupResult {
 export interface CleanupFilter {
   source_root: string
   before_days?: number
+  before_date?: string
   is_image?: boolean
   min_size?: number
   max_size?: number

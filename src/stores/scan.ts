@@ -11,6 +11,8 @@ interface ScanState {
   status: ScanStatus
   progress: ScanProgress
   error: string
+  selectedPaths: string[]
+  pendingBackup: boolean
 }
 
 export const useScanStore = defineStore('scan', {
@@ -20,7 +22,9 @@ export const useScanStore = defineStore('scan', {
     totalSize: 0,
     status: 'idle',
     progress: { scanned: 0, total: null, current_file: '' },
-    error: ''
+    error: '',
+    selectedPaths: [],
+    pendingBackup: false
   }),
   actions: {
     setOptions(options: ScanOptions) {
@@ -32,6 +36,17 @@ export const useScanStore = defineStore('scan', {
       this.status = 'idle'
       this.progress = { scanned: 0, total: null, current_file: '' }
       this.error = ''
+      this.selectedPaths = []
+      this.pendingBackup = false
+    },
+    requestBackup(paths: string[]) {
+      this.selectedPaths = [...paths]
+      this.pendingBackup = true
+    },
+    consumeBackupRequest(): boolean {
+      if (!this.pendingBackup) return false
+      this.pendingBackup = false
+      return true
     },
     async beginScan(options: ScanOptions) {
       this.reset()

@@ -4,7 +4,6 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct CopyProgressPayload {
   pub total_files: u64,
   pub completed_files: u64,

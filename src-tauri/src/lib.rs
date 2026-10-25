@@ -9,8 +9,8 @@ mod scanner;
 mod utils;
 
 use commands::backup::{
-  cancel_backup, get_backup_history, get_failed_files, pause_backup, resume_backup,
-  retry_failed_backup, start_backup, BackupState,
+  cancel_backup, get_backup_history, get_backup_tasks, get_failed_files, pause_backup,
+  resume_backup, retry_failed_backup, start_backup, BackupState,
 };
 use commands::cleanup::{
   cancel_cleanup, dry_run_cleanup, execute_cleanup, get_source_roots, CleanupState,
@@ -67,6 +67,7 @@ pub fn run() {
       resume_backup,
       cancel_backup,
       get_backup_history,
+      get_backup_tasks,
       dry_run_cleanup,
       execute_cleanup,
       cancel_cleanup,

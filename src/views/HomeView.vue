@@ -8,6 +8,7 @@ import { homeDir } from '@tauri-apps/api/path'
 import { ElMessage } from 'element-plus'
 import { i18n } from '@/locales'
 import { useScanStore } from '@/stores/scan'
+import { useSettings } from '@/composables/useSettings'
 
 const STATE_KEY = 'safe-keep.last-device'
 const PRESET_KEY = 'safe-keep.last-preset'
@@ -51,9 +52,11 @@ function mbToBytes(v: string): number | undefined {
 const router = useRouter()
 const scanStore = useScanStore()
 const { devices: volumes, refresh, watchDevices } = useDevice()
+const { settings: appSettings, load: loadAppSettings } = useSettings()
 
 onMounted(async () => {
   initSrcPath()
+  await loadAppSettings()
   initDstPath()
   try {
     await refresh()
@@ -142,6 +145,10 @@ async function initDstPath() {
   const last = loadLastDstPath(drivePath)
   if (last) {
     dstPath.value = last
+    return
+  }
+  if (appSettings.value.default_dest) {
+    dstPath.value = appSettings.value.default_dest
     return
   }
   try {
@@ -282,12 +289,23 @@ const orgKeys: Record<OrgOpt, string> = {
 }
 
 function startScan() {
+  const source = srcPath.value.trim()
+  const dest = dstPath.value.trim()
+  if (!source) {
+    ElMessage.error(i18n.global.t('home.source_required'))
+    return
+  }
+  if (!dest) {
+    ElMessage.error(i18n.global.t('home.dest_required'))
+    return
+  }
   saveSrcPath()
   saveDstPath()
   const imagesOn = IMAGE_FORMATS.some((fmt) => fmts[fmt])
   const videosOn = VIDEO_FORMATS.some((fmt) => fmts[fmt])
   scanStore.setOptions({
-    source_path: srcPath.value.trim(),
+    source_path: source,
+    dest_path: dest,
     include_images: imagesOn,
     include_videos: videosOn,
     min_size: mbToBytes(minSz.value),

@@ -1,6 +1,9 @@
+use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
 use tauri::{AppHandle, Emitter, State};
 
@@ -8,7 +11,7 @@ use crate::copier::conflict::ConflictStrategy;
 use crate::copier::parallel::FileCopier;
 use crate::copier::progress::BackupProgressEmitter;
 use crate::copier::{BackupFile, BackupResult, FailedFile};
-use crate::database::models::BackupHistoryEntry;
+use crate::database::models::{BackupHistoryEntry, BackupTask};
 use crate::database::queries;
 use crate::database::Database;
 
@@ -50,6 +53,113 @@ fn update_backup_task(
   }
 }
 
+fn record_meta(source_path: &str) -> (String, i64) {
+  let path = Path::new(source_path);
+  let file_name = path
+    .file_name()
+    .map(|n| n.to_string_lossy().to_string())
+    .unwrap_or_default();
+  let modified_at = fs::metadata(path)
+    .ok()
+    .and_then(|m| m.modified().ok())
+    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+    .map(|d| d.as_secs() as i64)
+    .unwrap_or(0);
+  (file_name, modified_at)
+}
+
+/// 备份开始前把本次要复制的文件写入 files 表（状态 pending）。
+///
+/// 这是清理 / 历史 / 还原页面的数据来源；之前只做对比不落库，导致这些页面永远为空。
+fn upsert_pending_records(
+  db: &Database,
+  source_root: &str,
+  dest_root: &Path,
+  files: &[BackupFile],
+) -> Result<(), String> {
+  let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+  let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+  for file in files {
+    let (file_name, modified_at) = record_meta(&file.source_path);
+    let dest_path = dest_root
+      .join(&file.relative_path)
+      .to_string_lossy()
+      .to_string();
+
+    tx.execute(
+      "INSERT INTO files
+         (source_root, relative_path, dest_path, file_name, file_size, modified_at, status)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending')
+       ON CONFLICT(source_root, relative_path) DO UPDATE SET
+         dest_path = excluded.dest_path,
+         file_name = excluded.file_name,
+         file_size = excluded.file_size,
+         modified_at = excluded.modified_at,
+         status = 'pending',
+         error_message = NULL",
+      rusqlite::params![
+        source_root,
+        file.relative_path,
+        dest_path,
+        file_name,
+        file.file_size as i64,
+        modified_at
+      ],
+    )
+    .map_err(|e| e.to_string())?;
+  }
+
+  tx.commit().map_err(|e| e.to_string())
+}
+
+/// 按复制结果精确更新本次涉及的文件，避免误改同源目录下其他文件的状态。
+fn update_backup_records(
+  db: &Database,
+  source_root: &str,
+  dest_root: &Path,
+  files: &[BackupFile],
+  result: &BackupResult,
+) -> Result<(), String> {
+  let succeeded: HashSet<&str> = result
+    .succeeded_files
+    .iter()
+    .map(String::as_str)
+    .collect();
+  let failed: HashMap<&str, &str> = result
+    .failed_files
+    .iter()
+    .map(|f| (f.relative_path.as_str(), f.error.as_str()))
+    .collect();
+
+  let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+  for file in files {
+    let dest_path = dest_root
+      .join(&file.relative_path)
+      .to_string_lossy()
+      .to_string();
+
+    if let Some(error) = failed.get(file.relative_path.as_str()) {
+      let _ = conn.execute(
+        "UPDATE files SET status = 'failed', error_message = ?1, dest_path = ?2
+         WHERE source_root = ?3 AND relative_path = ?4",
+        rusqlite::params![error, dest_path, source_root, file.relative_path],
+      );
+    } else if succeeded.contains(file.relative_path.as_str()) {
+      let _ = conn.execute(
+        "UPDATE files SET status = 'backed_up', error_message = NULL, dest_path = ?1,
+         backed_up_at = datetime('now')
+         WHERE source_root = ?2 AND relative_path = ?3",
+        rusqlite::params![dest_path, source_root, file.relative_path],
+      );
+    }
+    // 未处理（例如任务被取消）的文件保持 pending，下次扫描会重新纳入。
+  }
+
+  Ok(())
+}
+
 pub struct BackupState {
   pub cancel: Arc<AtomicBool>,
   pub paused: Arc<AtomicBool>,
@@ -65,12 +175,23 @@ impl BackupState {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StartBackupOptions {
   pub source_root: String,
   pub dest_path: String,
   pub files: Vec<BackupFile>,
   pub conflict_strategy: Option<String>,
   pub concurrency: Option<usize>,
+}
+
+fn canonical_source_root(source_root: &str) -> String {
+  fs::canonicalize(source_root)
+    .map(|p| p.to_string_lossy().to_string())
+    .unwrap_or_else(|_| {
+      source_root
+        .trim_end_matches(std::path::MAIN_SEPARATOR_STR)
+        .to_string()
+    })
 }
 
 #[tauri::command]
@@ -107,18 +228,19 @@ pub async fn start_backup(
     total_files, total_bytes, concurrency
   ));
 
-  let source_root = options
-    .source_root
-    .trim_end_matches(std::path::MAIN_SEPARATOR_STR)
-    .to_string();
+  let source_root = canonical_source_root(&options.source_root);
 
   // 创建备份任务记录
   let task_id = create_backup_task(&db, &source_root, &options.dest_path, total_files, total_bytes)
     .map_err(|e| format!("Failed to create backup task: {}", e))?;
 
+  // 写入待备份文件记录（files 表是清理 / 历史 / 还原的数据来源）
+  upsert_pending_records(&db, &source_root, dest_root, &options.files)
+    .map_err(|e| format!("Failed to record files: {}", e))?;
+
   let copier = FileCopier::new(concurrency, strategy);
   let result = copier.run(
-    options.files,
+    options.files.clone(),
     dest_root,
     progress.clone(),
     state.cancel.clone(),
@@ -138,7 +260,7 @@ pub async fn start_backup(
   );
 
   // 更新文件记录
-  if let Err(e) = update_backup_records(&db, &source_root, &options.dest_path, &result) {
+  if let Err(e) = update_backup_records(&db, &source_root, dest_root, &options.files, &result) {
     progress.emit_log(&format!("Warning: failed to update database: {}", e));
   }
 
@@ -152,33 +274,6 @@ pub async fn start_backup(
     .map_err(|e| e.to_string())?;
 
   Ok(result)
-}
-
-fn update_backup_records(
-  db: &Database,
-  source_root: &str,
-  dest_path: &str,
-  result: &BackupResult,
-) -> Result<(), String> {
-  let conn = db.conn.lock().map_err(|e| e.to_string())?;
-
-  // 更新成功备份的记录
-  let _ = conn.execute(
-    "UPDATE files SET status = 'backed_up', dest_path = ?1, backed_up_at = datetime('now')
-     WHERE source_root = ?2 AND status = 'pending'",
-    rusqlite::params![dest_path, source_root],
-  );
-
-  // 标记失败的文件
-  for f in &result.failed_files {
-    let _ = conn.execute(
-      "UPDATE files SET status = 'failed', error_message = ?1
-       WHERE source_root = ?2 AND relative_path = ?3",
-      rusqlite::params![f.error, source_root, f.relative_path],
-    );
-  }
-
-  Ok(())
 }
 
 /// 查询指定源目录下的失败文件
@@ -259,14 +354,17 @@ pub async fn retry_failed_backup(
     total_files, total_bytes, concurrency
   ));
 
-  let source_root = source_root.trim_end_matches(std::path::MAIN_SEPARATOR_STR).to_string();
+  let source_root = canonical_source_root(&source_root);
 
   let task_id = create_backup_task(&db, &source_root, &dest_path, total_files, total_bytes)
     .map_err(|e| format!("Failed to create backup task: {}", e))?;
 
+  upsert_pending_records(&db, &source_root, dest_root, &backup_files)
+    .map_err(|e| format!("Failed to record files: {}", e))?;
+
   let copier = FileCopier::new(concurrency, strategy);
   let result = copier.run(
-    backup_files,
+    backup_files.clone(),
     dest_root,
     progress.clone(),
     state.cancel.clone(),
@@ -283,7 +381,7 @@ pub async fn retry_failed_backup(
     result.avg_speed_mbps,
   );
 
-  if let Err(e) = update_backup_records(&db, &source_root, &dest_path, &result) {
+  if let Err(e) = update_backup_records(&db, &source_root, dest_root, &backup_files, &result) {
     progress.emit_log(&format!("Warning: failed to update database: {}", e));
   }
 
@@ -324,4 +422,11 @@ pub async fn get_backup_history(
 ) -> Result<Vec<BackupHistoryEntry>, String> {
   let conn = db.conn.lock().map_err(|e| e.to_string())?;
   queries::get_backup_history(&conn)
+}
+
+/// 备份任务列表（历史记录页使用，按时间倒序）
+#[tauri::command]
+pub async fn get_backup_tasks(db: State<'_, Database>) -> Result<Vec<BackupTask>, String> {
+  let conn = db.conn.lock().map_err(|e| e.to_string())?;
+  queries::get_backup_tasks(&conn)
 }

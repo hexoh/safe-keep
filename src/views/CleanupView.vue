@@ -1,114 +1,249 @@
 <script setup lang="ts">
-const ran = ref(false)
-const confirm = ref(false)
-const sel = ref(new Set([1, 2, 4]))
-const age = ref('90')
-const minSz = ref('100')
+import { ElMessage } from 'element-plus'
+import { useCleanup } from '@/composables/useCleanup'
+import { useSettings } from '@/composables/useSettings'
+import { getSourceRoots } from '@/api/cleanup'
+import { formatBytes, formatIsoDateTime } from '@/utils/format'
+import { i18n } from '@/locales'
+import type { CleanupFile, CleanupFilter } from '@/types/cleanup'
 
-const CLEANUP = [
-  {
-    id: 1,
-    name: 'VID_20231015_143221.mp4',
-    path: '/Users/zhao/Pictures/Backup/2023/10',
-    size: '512.0 MB',
-    age: '163 days'
-  },
-  {
-    id: 2,
-    name: 'VID_20231102_091135.mov',
-    path: '/Users/zhao/Pictures/Backup/2023/11',
-    size: '1.2 GB',
-    age: '145 days'
-  },
-  {
-    id: 3,
-    name: 'IMG_20231201_175423.jpg',
-    path: '/Users/zhao/Pictures/Backup/2023/12',
-    size: '3.8 MB',
-    age: '105 days'
-  },
-  {
-    id: 4,
-    name: 'VID_20231205_220018.mp4',
-    path: '/Users/zhao/Pictures/Backup/2023/12',
-    size: '347.2 MB',
-    age: '101 days'
-  },
-  {
-    id: 5,
-    name: 'IMG_20231220_090812.png',
-    path: '/Users/zhao/Pictures/Backup/2023/12',
-    size: '8.1 MB',
-    age: '86 days'
+const { loading, running, dryRunResult, cleanupResult, progress, error, dryRun, execute } =
+  useCleanup()
+const { settings, load } = useSettings()
+
+const sources = ref<string[]>([])
+const sourceRoot = ref('')
+const timeMode = ref<'days' | 'before'>('days')
+const days = ref('90')
+const beforeDate = ref('')
+const typeFilter = ref<'all' | 'image' | 'video'>('all')
+const minMb = ref('')
+const maxMb = ref('')
+const selected = ref(new Set<number>())
+const confirmStep = ref(false)
+const sourcesLoading = ref(false)
+
+const files = computed(() => dryRunResult.value?.files ?? [])
+const selectedFiles = computed(() => files.value.filter((f) => selected.value.has(f.file_id)))
+const selectedSize = computed(() => selectedFiles.value.reduce((sum, f) => sum + f.file_size, 0))
+const allSelected = computed(
+  () => files.value.length > 0 && files.value.every((f) => selected.value.has(f.file_id))
+)
+
+const cleanupPct = computed(() => {
+  const p = progress.value
+  if (!p || p.total_files === 0) return cleanupResult.value ? 100 : 0
+  return Math.min(100, Math.round((p.processed / p.total_files) * 100))
+})
+
+const deleteStrategy = computed(() => settings.value.delete_strategy)
+
+function mbToBytes(value: string): number | undefined {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 1024 * 1024) : undefined
+}
+
+function filePath(file: CleanupFile): string {
+  return `${file.source_root.replace(/[\\/]+$/, '')}/${file.relative_path}`
+}
+
+function toggle(fileId: number) {
+  const next = new Set(selected.value)
+  if (next.has(fileId)) next.delete(fileId)
+  else next.add(fileId)
+  selected.value = next
+  confirmStep.value = false
+}
+
+function toggleAll() {
+  selected.value = allSelected.value ? new Set() : new Set(files.value.map((f) => f.file_id))
+  confirmStep.value = false
+}
+
+async function loadSources() {
+  sourcesLoading.value = true
+  try {
+    sources.value = await getSourceRoots()
+    if (!sources.value.length) {
+      ElMessage.warning(i18n.global.t('cleanup.no_sources'))
+      return
+    }
+    if (!sourceRoot.value || !sources.value.includes(sourceRoot.value)) {
+      sourceRoot.value = sources.value[0] ?? ''
+    }
+  } catch {
+    ElMessage.error(i18n.global.t('cleanup.load_sources_failed'))
+  } finally {
+    sourcesLoading.value = false
   }
-]
-
-function toggle(id: number) {
-  const n = new Set(sel.value)
-  if (n.has(id)) n.delete(id)
-  else n.add(id)
-  sel.value = n
 }
 
-function toggleAll(e: Event) {
-  const checked = (e.target as HTMLInputElement).checked
-  sel.value = checked ? new Set(CLEANUP.map((f) => f.id)) : new Set()
+async function runSimulation() {
+  if (!sourceRoot.value) {
+    ElMessage.warning(i18n.global.t('cleanup.source_required'))
+    return
+  }
+
+  const filter: CleanupFilter = {
+    source_root: sourceRoot.value,
+    is_image: typeFilter.value === 'all' ? undefined : typeFilter.value === 'image',
+    min_size: mbToBytes(minMb.value),
+    max_size: mbToBytes(maxMb.value),
+    before_days: timeMode.value === 'days' ? Number(days.value) || undefined : undefined,
+    before_date: timeMode.value === 'before' && beforeDate.value ? beforeDate.value : undefined
+  }
+
+  confirmStep.value = false
+  await dryRun(filter)
+
+  if (dryRunResult.value) {
+    selected.value = new Set(dryRunResult.value.files.map((f) => f.file_id))
+  } else if (error.value) {
+    ElMessage.error(i18n.global.t('cleanup.dry_run_failed'))
+  }
 }
+
+function requestExecute() {
+  if (!selectedFiles.value.length) return
+  confirmStep.value = true
+}
+
+function cancelConfirm() {
+  confirmStep.value = false
+}
+
+async function confirmExecute() {
+  if (!selectedFiles.value.length) return
+  confirmStep.value = false
+  await execute([...selectedFiles.value], deleteStrategy.value === 'permanent')
+  if (error.value) {
+    ElMessage.error(i18n.global.t('cleanup.execute_failed'))
+    return
+  }
+  selected.value = new Set()
+}
+
+onMounted(async () => {
+  await load()
+  await loadSources()
+  if (settings.value.dry_run_default && sourceRoot.value) {
+    await runSimulation()
+  }
+})
+
+watch(sourceRoot, () => {
+  dryRunResult.value = null
+  cleanupResult.value = null
+  selected.value = new Set()
+  confirmStep.value = false
+})
 </script>
 
 <template>
   <div class="cleanup-view">
     <div class="page-header">
       <div class="header-left">
-        <h1>Safety Cleanup</h1>
-        <p>Remove source files only after confirming they are safely backed up.</p>
+        <h1>{{ $t('cleanup.title') }}</h1>
+        <p>{{ $t('cleanup.subtitle') }}</p>
       </div>
-      <div class="warning-badge">
-        <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-          <path
-            fillRule="evenodd"
-            d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-            clipRule="evenodd"
-          />
-        </svg>
-        Destructive — review carefully
-      </div>
+      <div class="warning-badge">{{ $t('cleanup.warning') }}</div>
     </div>
 
     <DesignCard padding="18px">
-      <div class="filter-row">
+      <div class="filter-grid">
         <div class="filter-field">
-          <DesignLabel text="Older than (days)" />
-          <input v-model="age" placeholder="90" class="filter-input" />
+          <DesignLabel :text="$t('cleanup.source_scope')" />
+          <select v-model="sourceRoot" class="filter-input" :disabled="sourcesLoading">
+            <option v-if="sources.length === 0" value="">{{ $t('cleanup.no_sources') }}</option>
+            <option v-for="source in sources" :key="source" :value="source">{{ source }}</option>
+          </select>
         </div>
+
         <div class="filter-field">
-          <DesignLabel text="Min size (MB)" />
-          <input v-model="minSz" placeholder="100" class="filter-input" />
+          <DesignLabel :text="$t('cleanup.time_range')" />
+          <div class="mode-row">
+            <DesignToggle
+              :label="$t('cleanup.mode_days')"
+              :on="timeMode === 'days'"
+              @change="timeMode = 'days'"
+            />
+            <DesignToggle
+              :label="$t('cleanup.mode_before')"
+              :on="timeMode === 'before'"
+              @change="timeMode = 'before'"
+            />
+          </div>
+          <input
+            v-if="timeMode === 'days'"
+            v-model="days"
+            type="number"
+            min="0"
+            class="filter-input"
+            :placeholder="$t('cleanup.older_than_days')"
+          />
+          <input
+            v-else
+            v-model="beforeDate"
+            type="date"
+            class="filter-input"
+            :placeholder="$t('cleanup.before_date')"
+          />
         </div>
+
         <div class="filter-field">
-          <DesignLabel text="Source scope" />
-          <input value="/Users/zhao/Pictures" class="filter-input" />
+          <DesignLabel :text="$t('cleanup.file_type')" />
+          <select v-model="typeFilter" class="filter-input">
+            <option value="all">{{ $t('common.all') }}</option>
+            <option value="image">{{ $t('common.images') }}</option>
+            <option value="video">{{ $t('common.videos') }}</option>
+          </select>
+          <div class="size-grid">
+            <input
+              v-model="minMb"
+              type="number"
+              min="0"
+              class="filter-input"
+              :placeholder="$t('cleanup.min_size_mb')"
+            />
+            <input
+              v-model="maxMb"
+              type="number"
+              min="0"
+              class="filter-input"
+              :placeholder="$t('cleanup.max_size_mb')"
+            />
+          </div>
         </div>
-        <button
-          class="sim-btn"
-          @click="
-            ran = true
-            confirm = false
-          "
-          >Run Simulation</button
-        >
+
+        <div class="filter-action">
+          <button
+            class="sim-btn"
+            :disabled="loading || sources.length === 0"
+            @click="runSimulation"
+          >
+            {{ loading ? $t('common.loading') : $t('cleanup.run_simulation') }}
+          </button>
+        </div>
       </div>
     </DesignCard>
 
-    <template v-if="ran">
+    <DesignCard v-if="error" padding="14px" class="error-card">
+      <span class="text-failed">{{ error }}</span>
+    </DesignCard>
+
+    <template v-if="dryRunResult">
       <div class="results-header">
         <div class="results-title">
-          <DesignLabel text="Simulation Results" />
-          <span class="dry-run-badge">DRY RUN</span>
+          <DesignLabel :text="$t('cleanup.simulation_results')" />
+          <span class="dry-run-badge">{{ $t('cleanup.dry_run_badge') }}</span>
         </div>
         <span class="results-summary">
-          {{ sel.size }} files ·
-          <span class="text-new mono" style="font-weight: 600">2.07 GB to free</span>
+          {{
+            $t('cleanup.files_to_free', {
+              count: files.length,
+              size: formatBytes(dryRunResult.total_size)
+            })
+          }}
         </span>
       </div>
 
@@ -117,80 +252,122 @@ function toggleAll(e: Event) {
           <thead>
             <tr>
               <th class="th-check">
-                <input type="checkbox" :checked="sel.size === CLEANUP.length" @change="toggleAll" />
+                <input type="checkbox" :checked="allSelected" @change="toggleAll" />
               </th>
-              <th>File</th>
-              <th>Location</th>
-              <th class="th-size">Size</th>
-              <th class="th-age">Age</th>
-              <th class="th-backup">Backup</th>
+              <th>{{ $t('cleanup.file') }}</th>
+              <th>{{ $t('cleanup.location') }}</th>
+              <th class="th-size">{{ $t('cleanup.size') }}</th>
+              <th class="th-date">{{ $t('cleanup.backed_up_at') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr
-              v-for="f in CLEANUP"
-              :key="f.id"
-              :class="['table-row', { selected: sel.has(f.id) }]"
-              @click="toggle(f.id)"
+              v-for="file in files"
+              :key="file.file_id"
+              :class="['table-row', { selected: selected.has(file.file_id) }]"
+              @click="toggle(file.file_id)"
             >
               <td class="td-check">
-                <input type="checkbox" :checked="sel.has(f.id)" @click.stop="toggle(f.id)" />
+                <input
+                  type="checkbox"
+                  :checked="selected.has(file.file_id)"
+                  @click.stop="toggle(file.file_id)"
+                />
               </td>
               <td
-                ><span class="mono-sm">{{ f.name }}</span></td
+                ><span class="mono-sm">{{ file.file_name }}</span></td
               >
               <td
-                ><span class="mono-sm muted mono-path">{{ f.path }}</span></td
+                ><span class="mono-sm muted mono-path">{{ filePath(file) }}</span></td
               >
-              <td class="mono muted">{{ f.size }}</td>
-              <td class="mono muted">{{ f.age }}</td>
-              <td>
-                <span class="verified-badge">
-                  <svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor">
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  Verified
-                </span>
-              </td>
+              <td class="mono muted">{{ formatBytes(file.file_size) }}</td>
+              <td class="mono muted">{{ formatIsoDateTime(file.backed_up_at) }}</td>
+            </tr>
+            <tr v-if="files.length === 0">
+              <td colspan="5" class="empty-cell">{{ $t('cleanup.no_candidates') }}</td>
             </tr>
           </tbody>
         </table>
       </DesignCard>
 
       <div class="action-row">
-        <template v-if="confirm">
-          <span class="confirm-warning">⚠ Permanently delete {{ sel.size }} source files?</span>
-          <button class="btn-secondary-sm" @click="confirm = false">Cancel</button>
-          <button class="btn-danger">Delete Now</button>
+        <span class="selection-info">
+          {{ $t('cleanup.selected_count', { count: selectedFiles.length }) }} ·
+          {{ formatBytes(selectedSize) }}
+        </span>
+        <template v-if="confirmStep">
+          <span class="confirm-warning">
+            {{ $t('cleanup.confirm_warning', { count: selectedFiles.length }) }}
+          </span>
+          <button class="btn-secondary-sm" @click="cancelConfirm">
+            {{ $t('common.cancel') }}
+          </button>
+          <button class="btn-danger" :disabled="running" @click="confirmExecute">
+            {{ $t('cleanup.delete_now') }}
+          </button>
         </template>
         <button
           v-else
           class="btn-danger"
-          :disabled="sel.size === 0"
-          @click="confirm = true"
-          :class="{ disabled: sel.size === 0 }"
+          :disabled="selectedFiles.length === 0 || running"
+          @click="requestExecute"
         >
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v3a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v3a1 1 0 102 0V8a1 1 0 00-1-1z"
-              clipRule="evenodd"
-            />
-          </svg>
-          Delete {{ sel.size }} Files
+          {{ $t('cleanup.execute_n', { count: selectedFiles.length }) }}
         </button>
       </div>
+
+      <DesignCard v-if="running" padding="14px">
+        <div class="progress-block">
+          <div class="progress-header">
+            <span>{{ $t('cleanup.progress') }}</span>
+            <span class="mono">{{ cleanupPct }}%</span>
+          </div>
+          <ProgressBar :value="cleanupPct" :height="6" />
+          <span v-if="progress?.current_file" class="mono-sm muted">
+            {{ progress.current_file }}
+          </span>
+        </div>
+      </DesignCard>
     </template>
 
-    <div v-else class="empty-state">
+    <DesignCard v-if="cleanupResult" padding="18px">
+      <div class="result-header">
+        <DesignLabel :text="$t('cleanup.result_title')" />
+        <span class="mono-sm muted">
+          {{
+            deleteStrategy === 'permanent'
+              ? $t('cleanup.permanent_hint')
+              : $t('cleanup.recycle_hint')
+          }}
+        </span>
+      </div>
+      <div class="result-grid">
+        <div class="result-item">
+          <span class="result-label">{{ $t('cleanup.result_success') }}</span>
+          <span class="result-value text-new">{{ cleanupResult.succeeded }}</span>
+        </div>
+        <div class="result-item">
+          <span class="result-label">{{ $t('cleanup.result_failed') }}</span>
+          <span class="result-value text-failed">{{ cleanupResult.failed }}</span>
+        </div>
+        <div class="result-item">
+          <span class="result-label">{{ $t('cleanup.result_released') }}</span>
+          <span class="result-value">{{ formatBytes(cleanupResult.freed_size) }}</span>
+        </div>
+      </div>
+      <div v-if="cleanupResult.errors.length" class="error-list">
+        <div v-for="(message, i) in cleanupResult.errors" :key="i" class="error-line">
+          {{ message }}
+        </div>
+      </div>
+      <button class="btn-secondary-sm result-refresh" @click="runSimulation">
+        {{ $t('cleanup.refresh') }}
+      </button>
+    </DesignCard>
+
+    <div v-if="!dryRunResult && !cleanupResult && !loading" class="empty-state">
       <span class="empty-icon">🧹</span>
-      <span class="empty-text"
-        >Configure filters and run a simulation to preview cleanup candidates</span
-      >
+      <span class="empty-text">{{ $t('cleanup.empty_hint') }}</span>
     </div>
   </div>
 </template>
@@ -229,7 +406,6 @@ function toggleAll(e: Event) {
 }
 
 .warning-badge {
-  display: flex;
   padding: 7px 13px;
   font-size: 11px;
   font-weight: 500;
@@ -237,32 +413,49 @@ function toggleAll(e: Event) {
   background: var(--modified-bg);
   border: 1px solid rgb(245 158 11 / 35%);
   border-radius: 7px;
-  align-items: center;
-  gap: 6px;
   flex-shrink: 0;
 }
 
-.filter-row {
+.filter-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: 1.2fr 1fr 1fr auto;
   gap: 14px;
   align-items: end;
 }
 
 .filter-field {
   display: flex;
+  min-width: 0;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 }
 
 .filter-input {
+  width: 100%;
   padding: 8px 11px;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
+}
+
+.mode-row {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.size-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.filter-action {
+  display: flex;
+  align-items: flex-end;
 }
 
 .sim-btn {
@@ -274,6 +467,15 @@ function toggleAll(e: Event) {
   background: var(--accent-dim);
   border: 1px solid rgb(79 127 255 / 40%);
   border-radius: 6px;
+}
+
+.sim-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.error-card {
+  color: var(--failed);
 }
 
 .results-header {
@@ -301,14 +503,6 @@ function toggleAll(e: Event) {
 .results-summary {
   font-size: 12px;
   color: var(--text-sec);
-}
-
-.text-new {
-  color: var(--new);
-}
-
-.mono {
-  font-family: var(--mono);
 }
 
 .design-table {
@@ -343,12 +537,8 @@ function toggleAll(e: Event) {
   width: 100px;
 }
 
-.th-age {
-  width: 100px;
-}
-
-.th-backup {
-  width: 110px;
+.th-date {
+  width: 170px;
 }
 
 .table-row {
@@ -363,26 +553,41 @@ function toggleAll(e: Event) {
   background: var(--card-hover);
 }
 
+.empty-cell {
+  padding: 24px !important;
+  color: var(--text-muted) !important;
+  text-align: center;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
 .mono-sm {
   font-family: var(--mono);
   font-size: 12px;
 }
 
 .mono-path {
+  display: inline-block;
+  max-width: 360px;
+  overflow: hidden;
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .muted {
   color: var(--text-muted);
 }
 
-.verified-badge {
-  display: flex;
-  font-size: 11px;
-  font-weight: 500;
+.text-new {
   color: var(--new);
-  align-items: center;
-  gap: 4px;
+}
+
+.text-failed {
+  color: var(--failed);
 }
 
 .action-row {
@@ -390,6 +595,12 @@ function toggleAll(e: Event) {
   justify-content: flex-end;
   align-items: center;
   gap: 10px;
+}
+
+.selection-info {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--text-sec);
 }
 
 .confirm-warning {
@@ -422,21 +633,92 @@ function toggleAll(e: Event) {
   gap: 6px;
 }
 
-.btn-danger.disabled {
+.btn-danger:disabled {
   color: var(--text-muted);
   cursor: not-allowed;
   background: var(--surface);
   border-color: var(--border);
 }
 
-.empty-state {
-  flex: 1;
+.progress-block {
   display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.progress-header {
+  display: flex;
+  font-size: 12px;
+  color: var(--text-sec);
+  justify-content: space-between;
+}
+
+.result-header {
+  display: flex;
+  margin-bottom: 12px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.result-item {
+  display: flex;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.result-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-sec);
+  text-transform: uppercase;
+}
+
+.result-value {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.error-list {
+  padding: 10px 12px;
+  margin-top: 12px;
+  background: var(--failed-bg);
+  border: 1px solid rgb(239 68 68 / 25%);
+  border-radius: 7px;
+}
+
+.error-line {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-sec);
+}
+
+.result-refresh {
+  margin-top: 12px;
+}
+
+.empty-state {
+  display: flex;
+  flex: 1;
   align-items: center;
   justify-content: center;
   flex-direction: column;
   gap: 8px;
-  opacity: 0.4;
+  opacity: 0.5;
 }
 
 .empty-icon {

@@ -33,4 +33,7 @@ pub struct RestoreResult {
   pub restored_bytes: u64,
   pub duration_secs: f64,
   pub errors: Vec<String>,
+  /// 成功还原的文件 ID，仅用于后端更新数据库，不发送给前端。
+  #[serde(skip)]
+  pub succeeded_file_ids: Vec<i64>,
 }

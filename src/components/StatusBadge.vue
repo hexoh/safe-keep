@@ -3,31 +3,27 @@ const props = defineProps<{
   status: string
 }>()
 
-const badgeMap: Record<string, { label: string; color: string; bg: string }> = {
-  new: { label: 'New', color: 'var(--new)', bg: 'var(--new-bg)' },
-  backed: { label: 'Backed Up', color: 'var(--backed)', bg: 'var(--backed-bg)' },
-  backed_up: { label: 'Backed Up', color: 'var(--backed)', bg: 'var(--backed-bg)' },
-  modified: { label: 'Modified', color: 'var(--modified)', bg: 'var(--modified-bg)' },
-  changed: { label: 'Changed', color: 'var(--modified)', bg: 'var(--modified-bg)' },
-  failed: { label: 'Failed', color: 'var(--failed)', bg: 'var(--failed-bg)' },
-  success: { label: 'Success', color: 'var(--new)', bg: 'var(--new-bg)' },
-  partial: { label: 'Partial', color: 'var(--modified)', bg: 'var(--modified-bg)' },
-  error: { label: 'Error', color: 'var(--failed)', bg: 'var(--failed-bg)' },
-  running: { label: 'Running', color: 'var(--accent)', bg: 'var(--accent-dim)' },
-  paused: { label: 'Paused', color: 'var(--modified)', bg: 'var(--modified-bg)' },
-  done: { label: 'Complete', color: 'var(--new)', bg: 'var(--new-bg)' },
-  verified: { label: 'Verified', color: 'var(--new)', bg: 'var(--new-bg)' }
+const badgeMap: Record<string, { color: string; bg: string }> = {
+  new: { color: 'var(--new)', bg: 'var(--new-bg)' },
+  backed: { color: 'var(--backed)', bg: 'var(--backed-bg)' },
+  backed_up: { color: 'var(--backed)', bg: 'var(--backed-bg)' },
+  modified: { color: 'var(--modified)', bg: 'var(--modified-bg)' },
+  changed: { color: 'var(--modified)', bg: 'var(--modified-bg)' },
+  failed: { color: 'var(--failed)', bg: 'var(--failed-bg)' },
+  success: { color: 'var(--new)', bg: 'var(--new-bg)' },
+  partial: { color: 'var(--modified)', bg: 'var(--modified-bg)' },
+  error: { color: 'var(--failed)', bg: 'var(--failed-bg)' },
+  running: { color: 'var(--accent)', bg: 'var(--accent-dim)' },
+  paused: { color: 'var(--modified)', bg: 'var(--modified-bg)' },
+  completed: { color: 'var(--new)', bg: 'var(--new-bg)' },
+  cancelled: { color: 'var(--modified)', bg: 'var(--modified-bg)' },
+  done: { color: 'var(--new)', bg: 'var(--new-bg)' },
+  verified: { color: 'var(--new)', bg: 'var(--new-bg)' }
 }
 
-const badge = computed(() => {
-  return (
-    badgeMap[props.status] ?? {
-      label: props.status,
-      color: 'var(--text-sec)',
-      bg: 'var(--surface)'
-    }
-  )
-})
+const badge = computed(
+  () => badgeMap[props.status] ?? { color: 'var(--text-sec)', bg: 'var(--surface)' }
+)
 </script>
 
 <template>

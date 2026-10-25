@@ -22,6 +22,7 @@ impl RestoreState {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StartRestoreOptions {
   pub source_root: String,
   pub restore_target: String,
@@ -115,14 +116,21 @@ pub async fn start_restore(
     },
   );
 
-  // Update database: mark successfully restored files
-  if result.succeeded > 0 {
+  // Update database: only mark the files that were actually restored.
+  if !result.succeeded_file_ids.is_empty() {
     if let Ok(conn) = db.conn.lock() {
-      let source_root = options.source_root.trim_end_matches(std::path::MAIN_SEPARATOR_STR);
-      let _ = conn.execute(
-        "UPDATE files SET status = 'restored' WHERE source_root = ?1 AND status = 'deleted'",
-        rusqlite::params![source_root],
-      );
+      let mut stmt = match conn.prepare("UPDATE files SET status = 'restored' WHERE id = ?1") {
+        Ok(stmt) => stmt,
+        Err(_) => {
+          app_handle
+            .emit("restore:complete", &result)
+            .map_err(|e| e.to_string())?;
+          return Ok(result);
+        }
+      };
+      for file_id in &result.succeeded_file_ids {
+        let _ = stmt.execute(rusqlite::params![file_id]);
+      }
     }
   }
 
