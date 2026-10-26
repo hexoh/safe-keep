@@ -3,7 +3,7 @@ import { useRouter } from 'vue-router'
 import { useScanStore } from '@/stores/scan'
 import { useBackup } from '@/composables/useBackup'
 import { useSettings } from '@/composables/useSettings'
-import { formatBytes, formatDuration } from '@/utils/format'
+import { formatBytes, formatDuration, formatSpeed } from '@/utils/format'
 import type { StartBackupOptions } from '@/api/backup'
 
 const router = useRouter()
@@ -81,6 +81,7 @@ const totalBytes = computed(
 const eta = computed(() => progress.value?.remaining_secs ?? null)
 const currentFile = computed(() => progress.value?.current_file ?? '')
 const duration = computed(() => result.value?.duration_secs ?? 0)
+const avgSpeed = computed(() => result.value?.avg_speed_mbps ?? 0)
 
 async function begin() {
   if (files.value.length === 0) return
@@ -241,7 +242,7 @@ watch(
               <div class="speed-item">
                 <DesignLabel :text="$t('backup.transfer_speed')" />
                 <span class="speed-val" style="color: var(--accent)">
-                  {{ speed.toFixed(1) }} MB/s
+                  {{ formatSpeed(speed) }}
                 </span>
               </div>
               <div class="speed-item">
@@ -310,7 +311,7 @@ watch(
             </div>
             <div class="summary-item">
               <span class="summary-label">{{ $t('backup.avg_speed') }}</span>
-              <span class="summary-value">{{ speed.toFixed(1) }} MB/s</span>
+              <span class="summary-value">{{ formatSpeed(avgSpeed) }}</span>
             </div>
           </div>
           <div v-if="result?.errors?.length" class="error-list">

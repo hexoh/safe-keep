@@ -1,9 +1,15 @@
+<script setup lang="ts">
+import { useAppVersion } from '@/composables/useAppVersion'
+
+const { appVersion } = useAppVersion()
+</script>
+
 <template>
   <div class="layout-logo">
     <div class="logo-icon">归</div>
     <div class="logo-text">
       <span class="logo-title">Safe Keep</span>
-      <span class="logo-version">v2.1.0</span>
+      <span v-if="appVersion" class="logo-version">v{{ appVersion }}</span>
     </div>
   </div>
 </template>

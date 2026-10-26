@@ -7,7 +7,7 @@ import { formatBytes, formatIsoDateTime } from '@/utils/format'
 import { i18n } from '@/locales'
 import type { CleanupFile, CleanupFilter } from '@/types/cleanup'
 
-const { loading, running, dryRunResult, cleanupResult, progress, error, dryRun, execute } =
+const { loading, running, dryRunResult, cleanupResult, progress, error, dryRun, execute, cancel } =
   useCleanup()
 const { settings, load } = useSettings()
 
@@ -48,6 +48,7 @@ function filePath(file: CleanupFile): string {
 }
 
 function toggle(fileId: number) {
+  if (running.value) return
   const next = new Set(selected.value)
   if (next.has(fileId)) next.delete(fileId)
   else next.add(fileId)
@@ -56,6 +57,7 @@ function toggle(fileId: number) {
 }
 
 function toggleAll() {
+  if (running.value) return
   selected.value = allSelected.value ? new Set() : new Set(files.value.map((f) => f.file_id))
   confirmStep.value = false
 }
@@ -121,6 +123,12 @@ async function confirmExecute() {
     return
   }
   selected.value = new Set()
+  if (!cleanupResult.value?.failed) void runSimulation()
+}
+
+async function stopCleanup() {
+  await cancel()
+  ElMessage.info(i18n.global.t('cleanup.cancelled'))
 }
 
 onMounted(async () => {
@@ -320,7 +328,12 @@ watch(sourceRoot, () => {
         <div class="progress-block">
           <div class="progress-header">
             <span>{{ $t('cleanup.progress') }}</span>
-            <span class="mono">{{ cleanupPct }}%</span>
+            <div class="progress-actions">
+              <span class="mono">{{ cleanupPct }}%</span>
+              <button class="btn-secondary-sm" @click="stopCleanup">
+                {{ $t('common.cancel') }}
+              </button>
+            </div>
           </div>
           <ProgressBar :value="cleanupPct" :height="6" />
           <span v-if="progress?.current_file" class="mono-sm muted">
@@ -651,6 +664,13 @@ watch(sourceRoot, () => {
   font-size: 12px;
   color: var(--text-sec);
   justify-content: space-between;
+  align-items: center;
+}
+
+.progress-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .result-header {

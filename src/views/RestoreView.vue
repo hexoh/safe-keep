@@ -87,6 +87,7 @@ function syncSelection() {
 }
 
 function toggle(fileId: number) {
+  if (running.value) return
   const next = new Set(selected.value)
   if (next.has(fileId)) next.delete(fileId)
   else next.add(fileId)
@@ -94,6 +95,7 @@ function toggle(fileId: number) {
 }
 
 function toggleAll(event: Event) {
+  if (running.value) return
   selected.value = (event.target as HTMLInputElement).checked
     ? new Set(sourceFiles.value.map((file) => file.file_id))
     : new Set()

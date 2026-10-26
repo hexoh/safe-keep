@@ -30,7 +30,7 @@ export function formatIsoDateTime(value?: string | null): string {
   const normalized = value.includes('T') ? value : value.replace(' ', 'T')
   const date = new Date(normalized)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
+  return date.toLocaleString(i18n.global.locale.value)
 }
 
 export function formatDuration(secs: number): string {

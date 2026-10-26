@@ -34,7 +34,7 @@ const filter = defineModel<{
         size="small"
         controls-position="right"
       />
-      <span class="size-unit">bytes</span>
+      <span class="size-unit">{{ $t('common.bytes') }}</span>
     </div>
   </div>
 </template>

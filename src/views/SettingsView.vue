@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
-import { getVersion } from '@tauri-apps/api/app'
 import { useTheme } from '@/composables/useTheme'
 import type { ThemeMode } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
 import type { Language } from '@/composables/useLocale'
 import { useSettings } from '@/composables/useSettings'
 import { useUpdater } from '@/composables/useUpdater'
+import { useAppVersion } from '@/composables/useAppVersion'
 import { i18n } from '@/locales'
 import type { AppSettings } from '@/types/settings'
 
@@ -14,11 +14,11 @@ const { theme } = useTheme()
 const { language } = useLocale()
 const { settings, loading, load, save } = useSettings()
 const { checking, updateAvailable, updateVersion, updateError, checkForUpdates } = useUpdater()
+const { appVersion } = useAppVersion()
 
 const ready = ref(false)
 const saving = ref(false)
 const saved = ref(false)
-const appVersion = ref('')
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let saveQueued = false
@@ -136,12 +136,6 @@ watch(
 
 onMounted(async () => {
   await load()
-
-  getVersion()
-    .then((v) => (appVersion.value = v))
-    .catch(() => {
-      appVersion.value = ''
-    })
 
   settings.value.concurrent_threads = Math.min(
     16,
