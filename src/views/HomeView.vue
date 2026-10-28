@@ -2,7 +2,7 @@
 import { useRouter } from 'vue-router'
 import { IMAGE_FORMATS, VIDEO_FORMATS } from '@/constants/media'
 import { useDevice } from '@/composables/useDevice'
-import { formatBytes } from '@/utils/format'
+import { formatBytes, formatCount } from '@/utils/format'
 import { countFiles, cancelCount } from '@/api/scan'
 import { homeDir } from '@tauri-apps/api/path'
 import { ElMessage } from 'element-plus'
@@ -234,6 +234,15 @@ const devices = computed(() =>
 
 const selectedDevice = computed(() => volumes.value[srcDev.value])
 
+// 设备类型标签（feature 3.1.6）：路径旁显示 MTP / U盘 / 本地磁盘。
+const deviceBadge = computed<{ key: string; icon: 'phone' | 'sd' | 'hdd' }>(() => {
+  const type = selectedDevice.value?.device_type
+  if (type === 'MTP') return { key: 'device.mtp', icon: 'phone' }
+  if (type === 'RemovableDisk') return { key: 'device.removable', icon: 'sd' }
+  if (type === 'LocalDisk') return { key: 'device.local', icon: 'hdd' }
+  return { key: 'device.unknown', icon: 'hdd' }
+})
+
 const selectedPct = computed(() => {
   const v = selectedDevice.value
   if (!v || v.total_space <= 0) return 0
@@ -437,12 +446,14 @@ function loadPreset() {
             :label="$t('home.source_path')"
             :value="srcPath"
             :placeholder="$t('home.source_placeholder')"
+            :badge="$t(deviceBadge.key)"
+            :badge-icon="deviceBadge.icon"
             :hint="
               srcPath.trim()
                 ? counting
                   ? $t('home.scanning')
                   : $t('home.scan_hint', {
-                      files: srcStats.count.toLocaleString(),
+                      files: formatCount(srcStats.count),
                       size: formatBytes(srcStats.bytes)
                     })
                 : undefined

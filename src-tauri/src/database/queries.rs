@@ -40,6 +40,75 @@ pub fn get_files_by_source(
   Ok(files)
 }
 
+/// 查询指定源目录下、状态命中给定集合的文件记录（历史详情页成功文件列表）。
+///
+/// `from` / `to` 可选，用于把结果限定在某个备份任务的时间窗口内，
+/// 这样同一个源目录下的多次备份任务能各自展示自己的文件列表。
+pub fn get_files_by_source_statuses(
+  conn: &Connection,
+  source_root: &str,
+  statuses: &[String],
+  from: Option<&str>,
+  to: Option<&str>,
+) -> Result<Vec<FileRecord>, String> {
+  if statuses.is_empty() {
+    return Ok(Vec::new());
+  }
+
+  let placeholders = std::iter::repeat("?")
+    .take(statuses.len())
+    .collect::<Vec<_>>()
+    .join(", ");
+  let mut sql = format!(
+    "SELECT id, source_root, relative_path, dest_path, file_name,
+            file_size, modified_at, status, backed_up_at, verified_at, error_message
+     FROM files WHERE source_root = ? AND status IN ({})",
+    placeholders
+  );
+  if from.is_some() {
+    sql.push_str(" AND backed_up_at >= ?");
+  }
+  if to.is_some() {
+    sql.push_str(" AND backed_up_at <= ?");
+  }
+  sql.push_str(" ORDER BY relative_path");
+
+  let mut values: Vec<String> = Vec::with_capacity(statuses.len() + 3);
+  values.push(source_root.to_string());
+  values.extend(statuses.iter().cloned());
+  if let Some(bound) = from {
+    values.push(bound.to_string());
+  }
+  if let Some(bound) = to {
+    values.push(bound.to_string());
+  }
+
+  let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+  let records = stmt
+    .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+      Ok(FileRecord {
+        id: row.get(0)?,
+        source_root: row.get(1)?,
+        relative_path: row.get(2)?,
+        dest_path: row.get(3)?,
+        file_name: row.get(4)?,
+        file_size: row.get(5)?,
+        modified_at: row.get(6)?,
+        status: row.get(7)?,
+        backed_up_at: row.get(8)?,
+        verified_at: row.get(9)?,
+        error_message: row.get(10)?,
+      })
+    })
+    .map_err(|e| e.to_string())?;
+
+  let mut files = Vec::new();
+  for record in records {
+    files.push(record.map_err(|e| e.to_string())?);
+  }
+  Ok(files)
+}
+
 /// 查询所有已备份且源端存在的文件（用于清理筛选）
 pub fn get_backed_up_files(
   conn: &Connection,

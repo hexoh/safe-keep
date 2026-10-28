@@ -4,6 +4,7 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import { ElMessage } from 'element-plus'
 import { useScanStore } from '@/stores/scan'
 import { formatBytes, formatDateTime } from '@/utils/format'
+import { sortCopy } from '@/utils/array'
 import { i18n } from '@/locales'
 import type { FileEntry } from '@/types/file'
 
@@ -53,9 +54,52 @@ const filtered = computed(() => {
   return files.value.filter((f) => f.status === filter.value)
 })
 
-const paged = computed(() => filtered.value.slice((page.value - 1) * PER, page.value * PER))
+type SortKey = 'file_name' | 'file_size' | 'modified_at' | 'status'
+type SortDir = 'asc' | 'desc'
 
-const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / PER)))
+const sortKey = ref<SortKey | null>(null)
+const sortDir = ref<SortDir>('asc')
+
+const statusOrder: Record<string, number> = { new: 0, changed: 1, backed_up: 2 }
+
+// 列头排序：同一列再次点击切换升/降序，切换列时重置为升序。
+function toggleSort(key: SortKey) {
+  if (sortKey.value === key) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = key
+    sortDir.value = 'asc'
+  }
+  page.value = 1
+}
+
+function sortValue(f: FileEntry, key: SortKey): string | number {
+  if (key === 'status') return statusOrder[f.status] ?? 99
+  if (key === 'file_name') return f.file_name.toLowerCase()
+  return f[key]
+}
+
+const sorted = computed(() => {
+  if (!sortKey.value) return filtered.value
+  const key = sortKey.value
+  const factor = sortDir.value === 'asc' ? 1 : -1
+  return sortCopy(filtered.value, (a, b) => {
+    const av = sortValue(a, key)
+    const bv = sortValue(b, key)
+    if (typeof av === 'string' || typeof bv === 'string') {
+      return String(av).localeCompare(String(bv), String(i18n.global.locale.value)) * factor
+    }
+    return (av - bv) * factor
+  })
+})
+
+const sortHint = computed(() =>
+  sortDir.value === 'asc' ? 'preview.sort_asc' : 'preview.sort_desc'
+)
+
+const paged = computed(() => sorted.value.slice((page.value - 1) * PER, page.value * PER))
+
+const pages = computed(() => Math.max(1, Math.ceil(sorted.value.length / PER)))
 
 const counts = computed(() => ({
   new: files.value.filter((f) => f.status === 'new').length,
@@ -64,6 +108,10 @@ const counts = computed(() => ({
 }))
 
 const totalSize = computed(() => formatBytes(scanStore.totalSize))
+
+const selectedBytes = computed(() =>
+  files.value.filter((f) => sel.value.has(f.path)).reduce((sum, f) => sum + f.file_size, 0)
+)
 
 const progressPct = computed(() => {
   const t = scanStore.progress.total
@@ -259,11 +307,55 @@ function openPreview(f: FileEntry) {
                     @change="toggleAll"
                   />
                 </th>
-                <th>{{ $t('preview.file_name') }}</th>
+                <th>
+                  <button
+                    :class="['th-sort', { active: sortKey === 'file_name' }]"
+                    :title="sortHint"
+                    @click="toggleSort('file_name')"
+                  >
+                    {{ $t('preview.file_name') }}
+                    <span class="sort-mark">{{
+                      sortKey === 'file_name' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'
+                    }}</span>
+                  </button>
+                </th>
                 <th class="th-type">{{ $t('preview.type') }}</th>
-                <th class="th-size">{{ $t('preview.size') }}</th>
-                <th class="th-modified">{{ $t('preview.modified_at') }}</th>
-                <th class="th-status">{{ $t('preview.status') }}</th>
+                <th class="th-size">
+                  <button
+                    :class="['th-sort', { active: sortKey === 'file_size' }]"
+                    :title="sortHint"
+                    @click="toggleSort('file_size')"
+                  >
+                    {{ $t('preview.size') }}
+                    <span class="sort-mark">{{
+                      sortKey === 'file_size' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'
+                    }}</span>
+                  </button>
+                </th>
+                <th class="th-modified">
+                  <button
+                    :class="['th-sort', { active: sortKey === 'modified_at' }]"
+                    :title="sortHint"
+                    @click="toggleSort('modified_at')"
+                  >
+                    {{ $t('preview.modified_at') }}
+                    <span class="sort-mark">{{
+                      sortKey === 'modified_at' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'
+                    }}</span>
+                  </button>
+                </th>
+                <th class="th-status">
+                  <button
+                    :class="['th-sort', { active: sortKey === 'status' }]"
+                    :title="sortHint"
+                    @click="toggleSort('status')"
+                  >
+                    {{ $t('preview.status') }}
+                    <span class="sort-mark">{{
+                      sortKey === 'status' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'
+                    }}</span>
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -303,7 +395,9 @@ function openPreview(f: FileEntry) {
         <div class="table-footer">
           <span class="footer-info">
             <span v-if="sel.size > 0" class="selected-count">
-              {{ $t('preview.selected', { count: sel.size }) }}
+              {{
+                $t('preview.selected_size', { count: sel.size, size: formatBytes(selectedBytes) })
+              }}
             </span>
             {{
               $t('preview.pagination', {
@@ -513,6 +607,34 @@ function openPreview(f: FileEntry) {
   text-transform: uppercase;
   background: var(--card);
   border-bottom: 1px solid var(--border);
+}
+
+.th-sort {
+  display: inline-flex;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  background: none;
+  border: none;
+  align-items: center;
+  gap: 3px;
+}
+
+.th-sort:hover,
+.th-sort.active {
+  color: var(--accent);
+}
+
+.sort-mark {
+  font-size: 9px;
+  opacity: 0.55;
+}
+
+.th-sort.active .sort-mark {
+  opacity: 1;
 }
 
 .design-table td {

@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
-import type { BackupHistoryEntry, BackupTask } from '@/types/backup'
+import type { BackupFileRecord, BackupHistoryEntry, BackupTask, FailedFile } from '@/types/backup'
 
 function escapeCsv(value: string): string {
   if (value.includes(',') || value.includes('"') || value.includes('\n')) {
@@ -90,5 +90,67 @@ export async function exportTasksJson(tasks: BackupTask[]): Promise<boolean> {
   })
   if (!path) return false
   await writeFile(path, JSON.stringify(tasks, null, 2))
+  return true
+}
+
+export interface TaskReport {
+  task: BackupTask
+  files: BackupFileRecord[]
+  failed: FailedFile[]
+}
+
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/)
+  return parts[parts.length - 1] || path
+}
+
+function generateTaskFileCsv(report: TaskReport): string {
+  const header =
+    'relative_path,file_name,file_size,status,dest_path,backed_up_at,modified_at,error_message'
+  const successRows = report.files.map((file) =>
+    [
+      escapeCsv(file.relative_path),
+      escapeCsv(file.file_name),
+      file.file_size,
+      file.status,
+      escapeCsv(file.dest_path),
+      file.backed_up_at ?? '',
+      file.modified_at,
+      escapeCsv(file.error_message ?? '')
+    ].join(',')
+  )
+  const failedRows = report.failed.map((file) =>
+    [
+      escapeCsv(file.relative_path),
+      escapeCsv(baseName(file.relative_path)),
+      file.file_size,
+      'failed',
+      escapeCsv(file.dest_path ?? ''),
+      '',
+      '',
+      escapeCsv(file.error)
+    ].join(',')
+  )
+  return [header, ...successRows, ...failedRows].join('\n')
+}
+
+/** 导出单个备份任务的文件明细报告（成功 + 失败）。 */
+export async function exportTaskReportCsv(report: TaskReport): Promise<boolean> {
+  const path = await save({
+    filters: [{ name: 'CSV', extensions: ['csv'] }],
+    defaultPath: `backup-task-${report.task.id}.csv`
+  })
+  if (!path) return false
+  await writeFile(path, generateTaskFileCsv(report))
+  return true
+}
+
+export async function exportTaskReportJson(report: TaskReport): Promise<boolean> {
+  const path = await save({
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    defaultPath: `backup-task-${report.task.id}.json`
+  })
+  if (!path) return false
+  await writeFile(path, JSON.stringify(report, null, 2))
   return true
 }

@@ -65,3 +65,18 @@ export interface FailedFile {
   file_size: number
   error: string
 }
+
+/** files 表记录（历史详情页文件列表使用），字段与 Rust 侧保持一致。 */
+export interface BackupFileRecord {
+  id: number
+  source_root: string
+  relative_path: string
+  dest_path: string
+  file_name: string
+  file_size: number
+  modified_at: number
+  status: FileStatus
+  backed_up_at: string | null
+  verified_at: string | null
+  error_message: string | null
+}

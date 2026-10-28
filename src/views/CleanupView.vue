@@ -32,6 +32,20 @@ const allSelected = computed(
   () => files.value.length > 0 && files.value.every((f) => selected.value.has(f.file_id))
 )
 
+// 结果列表分页（feature 3.1.7 / 3.2.6）：勾选状态跨页保留，全选作用于全部候选文件。
+const PER = 10
+const page = ref(1)
+const pages = computed(() => Math.max(1, Math.ceil(files.value.length / PER)))
+const pagedFiles = computed(() => files.value.slice((page.value - 1) * PER, page.value * PER))
+
+function goPage(target: number) {
+  if (target >= 1 && target <= pages.value) page.value = target
+}
+
+watch(files, () => {
+  if (page.value > pages.value) page.value = 1
+})
+
 const cleanupPct = computed(() => {
   const p = progress.value
   if (!p || p.total_files === 0) return cleanupResult.value ? 100 : 0
@@ -117,6 +131,7 @@ async function runSimulation() {
   }
 
   confirmStep.value = false
+  page.value = 1
   await dryRun(filter)
 
   if (dryRunResult.value) {
@@ -296,7 +311,7 @@ watch(sourceRoot, () => {
           </thead>
           <tbody>
             <tr
-              v-for="file in files"
+              v-for="file in pagedFiles"
               :key="file.file_id"
               :class="['table-row', { selected: selected.has(file.file_id) }]"
               @click="toggle(file.file_id)"
@@ -322,6 +337,27 @@ watch(sourceRoot, () => {
             </tr>
           </tbody>
         </table>
+
+        <div v-if="files.length > 0" class="table-footer">
+          <span class="footer-info">
+            {{
+              $t('cleanup.pagination', {
+                from: (page - 1) * PER + 1,
+                to: Math.min(page * PER, files.length),
+                total: files.length
+              })
+            }}
+          </span>
+          <div class="pager">
+            <button class="page-nav" :disabled="page <= 1" @click="goPage(page - 1)">
+              ‹ {{ $t('common.prev') }}
+            </button>
+            <span class="page-current">{{ page }} / {{ pages }}</span>
+            <button class="page-nav" :disabled="page >= pages" @click="goPage(page + 1)">
+              {{ $t('common.next') }} ›
+            </button>
+          </div>
+        </div>
       </DesignCard>
 
       <div class="action-row">
@@ -602,6 +638,48 @@ watch(sourceRoot, () => {
   padding: 24px !important;
   color: var(--text-muted) !important;
   text-align: center;
+}
+
+.table-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.footer-info {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-sec);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-nav {
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--text-sec);
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.page-nav:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.page-current {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-sec);
 }
 
 .mono {

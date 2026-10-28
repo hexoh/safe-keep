@@ -6,6 +6,9 @@ const props = defineProps<{
   value: string
   placeholder: string
   hint?: string
+  /** 设备类型等附加标签（feature 3.1.6），由调用方翻译后传入。 */
+  badge?: string
+  badgeIcon?: 'phone' | 'sd' | 'hdd'
 }>()
 
 const emit = defineEmits<{
@@ -30,7 +33,15 @@ async function browse() {
 
 <template>
   <div class="design-path-input">
-    <DesignLabel :text="label" />
+    <div class="label-row">
+      <DesignLabel :text="label" />
+      <span v-if="badge" class="device-badge">
+        <icon-local-phone v-if="badgeIcon === 'phone'" />
+        <icon-local-sd v-else-if="badgeIcon === 'sd'" />
+        <icon-local-hdd v-else />
+        {{ badge }}
+      </span>
+    </div>
     <div class="input-row">
       <input
         :value="value"
@@ -62,6 +73,25 @@ async function browse() {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 7px;
+}
+
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.device-badge {
+  display: inline-flex;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: 5px;
+  align-items: center;
+  gap: 4px;
 }
 
 .path-field {

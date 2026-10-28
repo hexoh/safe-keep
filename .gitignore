@@ -38,3 +38,6 @@ types/auto-imports.d.ts
 
 # eslint
 .eslintcache
+
+# Workbuddy
+.workbuddy/

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FileEntry } from '@/types/file'
-import { formatBytes } from '@/utils/format'
+import { formatBytes, formatDateTime } from '@/utils/format'
 
 defineProps<{
   files: FileEntry[]
@@ -14,10 +14,6 @@ const statusTag = {
   backed_up: 'info',
   changed: 'warning'
 } as const
-
-function formatDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString()
-}
 </script>
 
 <template>
@@ -42,7 +38,7 @@ function formatDate(timestamp: number): string {
     </el-table-column>
     <el-table-column :label="$t('preview.modified_at')" width="180" sortable>
       <template #default="{ row }: { row: FileEntry }">
-        {{ formatDate(row.modified_at) }}
+        {{ formatDateTime(row.modified_at) }}
       </template>
     </el-table-column>
     <el-table-column :label="$t('preview.status')" width="100" sortable>

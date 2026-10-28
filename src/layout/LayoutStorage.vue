@@ -4,6 +4,7 @@ import { useDevice } from '@/composables/useDevice'
 import { useSettings } from '@/composables/useSettings'
 import { useScanStore } from '@/stores/scan'
 import { formatBytes } from '@/utils/format'
+import { sortCopy } from '@/utils/array'
 
 const { settings, load } = useSettings()
 const { devices, refresh } = useDevice()
@@ -33,15 +34,17 @@ function volumeForPath(path: string) {
   const normalized = path.replace(/\\/g, '/')
 
   return (
-    devices.value
-      .map((device) => ({
-        device,
-        root: device.path.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
-      }))
-      .filter(({ root }) =>
-        root === '/' ? normalized.startsWith('/') : normalized.startsWith(`${root}/`)
-      )
-      .toSorted((a, b) => b.root.length - a.root.length)[0]?.device ?? null
+    sortCopy(
+      devices.value
+        .map((device) => ({
+          device,
+          root: device.path.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+        }))
+        .filter(({ root }) =>
+          root === '/' ? normalized.startsWith('/') : normalized.startsWith(`${root}/`)
+        ),
+      (a, b) => b.root.length - a.root.length
+    )[0]?.device ?? null
   )
 }
 

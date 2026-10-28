@@ -3,6 +3,7 @@ import { ElMessage } from 'element-plus'
 import { useRestore } from '@/composables/useRestore'
 import { useSettings } from '@/composables/useSettings'
 import { formatBytes, formatDuration, formatIsoDateTime } from '@/utils/format'
+import { sortCopy } from '@/utils/array'
 import { i18n } from '@/locales'
 import type { RestoreFile } from '@/types/restore'
 
@@ -35,7 +36,7 @@ const groups = computed(() => {
     }
     map.set(file.source_root, group)
   }
-  return [...map.values()].toSorted((a, b) => (b.latest ?? '').localeCompare(a.latest ?? ''))
+  return sortCopy([...map.values()], (a, b) => (b.latest ?? '').localeCompare(a.latest ?? ''))
 })
 
 const sourceFiles = computed(() =>

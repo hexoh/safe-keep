@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { BackupProgress } from '@/types/backup'
-import type { BackupHistoryEntry, BackupTask } from '@/types/backup'
+import type { BackupFileRecord, BackupHistoryEntry, BackupTask } from '@/types/backup'
 
 export async function getBackupHistory(): Promise<BackupHistoryEntry[]> {
   return invoke<BackupHistoryEntry[]>('get_backup_history')
@@ -61,6 +61,21 @@ export async function cancelBackup(): Promise<void> {
 
 export async function getFailedFiles(sourceRoot: string): Promise<FailedFile[]> {
   return invoke<FailedFile[]>('get_failed_files', { sourceRoot })
+}
+
+/** 查询某源目录下指定状态的文件记录（历史详情页的成功文件列表）。 */
+export async function getSourceFiles(
+  sourceRoot: string,
+  statuses: string[] = ['backed_up', 'verified', 'restored'],
+  from?: string | null,
+  to?: string | null
+): Promise<BackupFileRecord[]> {
+  return invoke<BackupFileRecord[]>('get_source_files', {
+    sourceRoot,
+    statuses,
+    from: from ?? null,
+    to: to ?? null
+  })
 }
 
 export interface RetryBackupOptions {

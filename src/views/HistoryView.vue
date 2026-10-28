@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
-import { getBackupTasks, getFailedFiles, retryFailedBackup } from '@/api/backup'
-import type { FailedFile } from '@/api/backup'
-import { exportTasksCsv, exportTasksJson } from '@/api/export'
+import { getBackupTasks, getFailedFiles, getSourceFiles, retryFailedBackup } from '@/api/backup'
+import type { BackupFileRecord, BackupTask, FailedFile } from '@/types/backup'
+import {
+  exportTaskReportCsv,
+  exportTaskReportJson,
+  exportTasksCsv,
+  exportTasksJson
+} from '@/api/export'
 import { useSettings } from '@/composables/useSettings'
 import { formatBytes, formatDuration, formatIsoDateTime, formatSpeed } from '@/utils/format'
 import { translateError } from '@/utils/errors'
 import { i18n } from '@/locales'
-import type { BackupTask } from '@/types/backup'
 
 const { settings, load } = useSettings()
 
@@ -19,6 +23,13 @@ const failedByTask = ref<Record<number, FailedFile[]>>({})
 const failedLoading = ref(false)
 const retryingId = ref<number | null>(null)
 const exporting = ref(false)
+
+// 详情里的成功文件列表（feature 3.2.7）：默认只渲染前 N 条，避免上万条记录卡顿。
+const successByTask = ref<Record<number, BackupFileRecord[]>>({})
+const successLoading = ref(false)
+const expandedByTask = ref<Record<number, boolean>>({})
+const exportingTaskId = ref<number | null>(null)
+const VISIBLE_LIMIT = 20
 
 const statusColor: Record<string, string> = {
   completed: 'var(--new)',
@@ -101,6 +112,67 @@ async function toggleTask(task: BackupTask) {
   }
   openId.value = task.id
   if (task.failed_files > 0) await loadFailedFiles(task)
+  await loadSuccessFiles(task)
+}
+
+async function loadSuccessFiles(task: BackupTask, force = false) {
+  if (!force && successByTask.value[task.id]) return
+  successLoading.value = true
+  try {
+    successByTask.value = {
+      ...successByTask.value,
+      [task.id]: await fetchTaskFiles(task)
+    }
+  } catch (e: any) {
+    ElMessage.error(typeof e === 'string' ? e : (e?.message ?? 'Unknown error'))
+  } finally {
+    successLoading.value = false
+  }
+}
+
+/** 只取该任务时间窗口内完成的文件，避免同源目录的多次任务互相串数据。 */
+function fetchTaskFiles(task: BackupTask): Promise<BackupFileRecord[]> {
+  return getSourceFiles(task.source_root, undefined, task.started_at, task.completed_at)
+}
+
+function successFiles(task: BackupTask): BackupFileRecord[] {
+  return successByTask.value[task.id] ?? []
+}
+
+function failedFiles(task: BackupTask): FailedFile[] {
+  return failedByTask.value[task.id] ?? []
+}
+
+function visibleSuccess(task: BackupTask): BackupFileRecord[] {
+  const list = successFiles(task)
+  return expandedByTask.value[task.id] ? list : list.slice(0, VISIBLE_LIMIT)
+}
+
+function toggleExpand(task: BackupTask) {
+  expandedByTask.value = {
+    ...expandedByTask.value,
+    [task.id]: !expandedByTask.value[task.id]
+  }
+}
+
+async function exportTask(task: BackupTask, kind: 'csv' | 'json') {
+  if (exportingTaskId.value != null) return
+  exportingTaskId.value = task.id
+  try {
+    const files = successByTask.value[task.id] ?? (await fetchTaskFiles(task))
+    successByTask.value = { ...successByTask.value, [task.id]: files }
+    const failed =
+      failedByTask.value[task.id] ??
+      (task.failed_files > 0 ? await getFailedFiles(task.source_root) : [])
+    const report = { task, files, failed }
+    const saved =
+      kind === 'csv' ? await exportTaskReportCsv(report) : await exportTaskReportJson(report)
+    if (saved) ElMessage.success(i18n.global.t('history.export_done'))
+  } catch {
+    ElMessage.error(i18n.global.t('history.export_failed'))
+  } finally {
+    exportingTaskId.value = null
+  }
 }
 
 async function retryTask(task: BackupTask) {
@@ -136,7 +208,7 @@ async function retryTask(task: BackupTask) {
   } catch (e: any) {
     ElMessage.error(
       i18n.global.t('history.retry_error', {
-        error: typeof e === 'string' ? e : (e?.message ?? 'Unknown error')
+        error: translateError(typeof e === 'string' ? e : (e?.message ?? 'Unknown error'))
       })
     )
   } finally {
@@ -304,6 +376,58 @@ onMounted(loadTasks)
             >
           </div>
 
+          <div class="file-section">
+            <div class="file-section-header">
+              <span class="file-section-title">
+                {{ $t('history.success_files') }}
+                <span class="file-section-count">
+                  {{ $t('history.files_total', { count: successFiles(task).length }) }}
+                </span>
+              </span>
+              <div class="file-section-actions">
+                <button
+                  class="btn-secondary-sm"
+                  :disabled="exportingTaskId === task.id"
+                  @click.stop="exportTask(task, 'csv')"
+                >
+                  {{ $t('history.export_task_csv') }}
+                </button>
+                <button
+                  class="btn-secondary-sm"
+                  :disabled="exportingTaskId === task.id"
+                  @click.stop="exportTask(task, 'json')"
+                >
+                  {{ $t('history.export_task_json') }}
+                </button>
+              </div>
+            </div>
+
+            <div v-if="successLoading && !successByTask[task.id]" class="file-line muted">
+              {{ $t('common.loading') }}
+            </div>
+            <div v-for="file in visibleSuccess(task)" :key="file.id" class="file-line">
+              <span class="file-name">{{ file.relative_path }}</span>
+              <span class="file-meta mono-sm">{{ formatBytes(file.file_size) }}</span>
+            </div>
+            <div
+              v-if="successByTask[task.id] && successFiles(task).length === 0"
+              class="file-line muted"
+            >
+              {{ $t('history.no_success') }}
+            </div>
+            <button
+              v-if="successFiles(task).length > VISIBLE_LIMIT"
+              class="btn-secondary-sm show-all-btn"
+              @click.stop="toggleExpand(task)"
+            >
+              {{
+                expandedByTask[task.id]
+                  ? $t('history.collapse')
+                  : $t('history.show_all', { count: successFiles(task).length })
+              }}
+            </button>
+          </div>
+
           <div v-if="task.failed_files > 0" class="failed-section">
             <div class="failed-header">
               <span class="failed-title">{{ $t('history.failed_files') }}</span>
@@ -318,12 +442,12 @@ onMounted(loadTasks)
             <div v-if="failedLoading && !failedByTask[task.id]" class="failed-line muted">
               {{ $t('common.loading') }}
             </div>
-            <div v-for="(file, i) in failedByTask[task.id] || []" :key="i" class="failed-line">
+            <div v-for="(file, i) in failedFiles(task)" :key="i" class="failed-line">
               <span class="failed-name">{{ file.relative_path }}</span>
               <span class="failed-error">{{ file.error }}</span>
             </div>
             <div
-              v-if="failedByTask[task.id] && failedByTask[task.id].length === 0"
+              v-if="failedByTask[task.id] && failedFiles(task).length === 0"
               class="failed-line muted"
             >
               {{ $t('history.retry_empty') }}
@@ -554,6 +678,68 @@ onMounted(loadTasks)
   background: var(--failed-bg);
   border: 1px solid rgb(239 68 68 / 20%);
   border-radius: 7px;
+}
+
+.file-section {
+  padding: 10px 14px;
+  margin-top: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.file-section-header {
+  display: flex;
+  margin-bottom: 8px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--new);
+}
+
+.file-section-count {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.file-section-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.file-line {
+  display: flex;
+  padding: 3px 0 3px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-sec);
+  border-left: 2px solid var(--new);
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.file-name {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-meta {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.show-all-btn {
+  margin-top: 8px;
 }
 
 .failed-header {

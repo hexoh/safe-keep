@@ -11,7 +11,7 @@ use crate::copier::conflict::ConflictStrategy;
 use crate::copier::parallel::FileCopier;
 use crate::copier::progress::BackupProgressEmitter;
 use crate::copier::{BackupFile, BackupResult, FailedFile};
-use crate::database::models::{BackupHistoryEntry, BackupTask};
+use crate::database::models::{BackupHistoryEntry, BackupTask, FileRecord};
 use crate::database::queries;
 use crate::database::Database;
 use crate::device::list::available_space;
@@ -265,6 +265,12 @@ pub async fn start_backup(
     state.paused.clone(),
   )?;
 
+  // 先写文件记录、再落任务完成时间：保证 backed_up_at <= completed_at，
+  // 历史详情页按任务时间窗口筛选成功文件时才不会漏数据。
+  if let Err(e) = update_backup_records(&db, &source_root, dest_root, &options.files, &result) {
+    progress.emit_log(&format!("Warning: failed to update database: {}", e));
+  }
+
   // 更新备份任务
   let is_cancelled = state.cancel.load(Ordering::SeqCst);
   update_backup_task(
@@ -276,11 +282,6 @@ pub async fn start_backup(
     if is_cancelled { "cancelled" } else { "completed" },
     result.avg_speed_mbps,
   );
-
-  // 更新文件记录
-  if let Err(e) = update_backup_records(&db, &source_root, dest_root, &options.files, &result) {
-    progress.emit_log(&format!("Warning: failed to update database: {}", e));
-  }
 
   progress.emit_log(&format!(
     "Backup complete: {} succeeded, {} failed, {:.2} MB/s avg",
@@ -407,6 +408,11 @@ pub async fn retry_failed_backup(
     state.paused.clone(),
   )?;
 
+  if let Err(e) = update_backup_records(&db, &source_root, dest_root, &backup_files, &result) {
+    progress.emit_log(&format!("Warning: failed to update database: {}", e));
+  }
+
+  // 同上：文件记录先落库，任务完成时间后写，保证任务时间窗口覆盖到本次文件。
   update_backup_task(
     &db,
     task_id,
@@ -416,10 +422,6 @@ pub async fn retry_failed_backup(
     "completed",
     result.avg_speed_mbps,
   );
-
-  if let Err(e) = update_backup_records(&db, &source_root, dest_root, &backup_files, &result) {
-    progress.emit_log(&format!("Warning: failed to update database: {}", e));
-  }
 
   progress.emit_log(&format!(
     "Retry complete: {} succeeded, {} failed",
@@ -465,4 +467,23 @@ pub async fn get_backup_history(
 pub async fn get_backup_tasks(db: State<'_, Database>) -> Result<Vec<BackupTask>, String> {
   let conn = db.conn.lock().map_err(|e| e.to_string())?;
   queries::get_backup_tasks(&conn)
+}
+
+/// 查询指定源目录下的文件记录（历史详情页展示成功 / 失败文件列表）
+#[tauri::command]
+pub async fn get_source_files(
+  source_root: String,
+  statuses: Vec<String>,
+  from: Option<String>,
+  to: Option<String>,
+  db: State<'_, Database>,
+) -> Result<Vec<FileRecord>, String> {
+  let conn = db.conn.lock().map_err(|e| e.to_string())?;
+  queries::get_files_by_source_statuses(
+    &conn,
+    &source_root,
+    &statuses,
+    from.as_deref(),
+    to.as_deref(),
+  )
 }
