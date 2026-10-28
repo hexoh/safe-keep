@@ -50,8 +50,12 @@ fn platform_detect(path: &Path) -> DeviceType {
     String::from_utf8_lossy(&slice[..end]).to_string()
   };
 
+  // macFUSE 4.x 注册的文件系统类型名是 `macfuse`，老版 osxfuse 是 `osxfuse`，
+  // `fusefs` 是 macFUSE 2.x 的历史名。三者都是第三方 FUSE 桥接，
+  // 在本应用的使用场景里基本等同于 MTP 手机桥接（Android File Transfer / MacDroid 等），
+  // 因此统一按 MTP 处理：关掉逐文件内容哈希、按单会话限制并发、删除走永久删除。
   match fstype.as_str() {
-    "mtmfs" | "fusefs" => DeviceType::MTP,
+    "mtmfs" | "fusefs" | "macfuse" | "macfuse4" | "osxfuse" => DeviceType::MTP,
     _ if path.to_string_lossy().starts_with("/Volumes/") => DeviceType::RemovableDisk,
     _ => DeviceType::LocalDisk,
   }

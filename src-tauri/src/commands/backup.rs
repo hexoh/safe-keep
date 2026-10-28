@@ -15,6 +15,7 @@ use crate::database::models::{BackupHistoryEntry, BackupTask, FileRecord};
 use crate::database::queries;
 use crate::database::Database;
 use crate::device::list::available_space;
+use crate::device::profile::DeviceProfile;
 
 const ERR_DISK_FULL: &str = "ERR_DISK_FULL";
 
@@ -56,18 +57,29 @@ fn update_backup_task(
   }
 }
 
-fn record_meta(source_path: &str) -> (String, i64) {
-  let path = Path::new(source_path);
+/// 取文件记录所需的 (file_name, modified_at)。
+///
+/// 优先使用扫描阶段已经取得的 `modified_at`：在 MTP / FUSE 设备上，
+/// 为每个文件再 stat 一次就是一次完整的目录树串行往返（每个文件一次协议请求），
+/// 几千个文件能白等好几分钟。只有旧客户端没传时才回退到实时 stat。
+fn record_meta(file: &BackupFile) -> (String, i64) {
+  let path = Path::new(&file.source_path);
   let file_name = path
     .file_name()
     .map(|n| n.to_string_lossy().to_string())
     .unwrap_or_default();
-  let modified_at = fs::metadata(path)
-    .ok()
-    .and_then(|m| m.modified().ok())
-    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-    .map(|d| d.as_secs() as i64)
-    .unwrap_or(0);
+
+  let modified_at = if file.modified_at > 0 {
+    file.modified_at
+  } else {
+    fs::metadata(path)
+      .ok()
+      .and_then(|m| m.modified().ok())
+      .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+      .map(|d| d.as_secs() as i64)
+      .unwrap_or(0)
+  };
+
   (file_name, modified_at)
 }
 
@@ -84,7 +96,7 @@ fn upsert_pending_records(
   let tx = conn.transaction().map_err(|e| e.to_string())?;
 
   for file in files {
-    let (file_name, modified_at) = record_meta(&file.source_path);
+    let (file_name, modified_at) = record_meta(file);
     let dest_path = dest_root
       .join(file.dest_relative())
       .to_string_lossy()
@@ -135,7 +147,8 @@ fn update_backup_records(
     .map(|f| (f.relative_path.as_str(), f.error.as_str()))
     .collect();
 
-  let conn = db.conn.lock().map_err(|e| e.to_string())?;
+  let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+  let tx = conn.transaction().map_err(|e| e.to_string())?;
 
   for file in files {
     let dest_path = dest_root
@@ -144,13 +157,13 @@ fn update_backup_records(
       .to_string();
 
     if let Some(error) = failed.get(file.relative_path.as_str()) {
-      let _ = conn.execute(
+      let _ = tx.execute(
         "UPDATE files SET status = 'failed', error_message = ?1, dest_path = ?2
          WHERE source_root = ?3 AND relative_path = ?4",
         rusqlite::params![error, dest_path, source_root, file.relative_path],
       );
     } else if succeeded.contains(file.relative_path.as_str()) {
-      let _ = conn.execute(
+      let _ = tx.execute(
         "UPDATE files SET status = 'backed_up', error_message = NULL, dest_path = ?1,
          backed_up_at = datetime('now')
          WHERE source_root = ?2 AND relative_path = ?3",
@@ -160,7 +173,8 @@ fn update_backup_records(
     // 未处理（例如任务被取消）的文件保持 pending，下次扫描会重新纳入。
   }
 
-  Ok(())
+  // 单事务提交：几千个文件逐条自动提交会产生几千次 WAL 落盘。
+  tx.commit().map_err(|e| e.to_string())
 }
 
 pub struct BackupState {
@@ -231,7 +245,11 @@ pub async fn start_backup(
 
   ensure_disk_space(dest_root, total_bytes)?;
 
-  let concurrency = options.concurrency.unwrap_or(4).clamp(1, 16);
+  let source_root = canonical_source_root(&options.source_root);
+  // 源端设备类型决定并发上限与读写缓冲：MTP 是单会话协议，并发过高会在设备端
+  // 串行化甚至互相抢锁；而它的每次 read 都是一次协议往返，缓冲必须放大。
+  let profile = DeviceProfile::detect(Path::new(&source_root));
+  let concurrency = profile.clamp_concurrency(options.concurrency.unwrap_or(4));
   let strategy = ConflictStrategy::from_str(
     options
       .conflict_strategy
@@ -242,11 +260,13 @@ pub async fn start_backup(
   let progress = BackupProgressEmitter::new(Some(Arc::new(app.clone())), total_files, total_bytes);
 
   progress.emit_log(&format!(
-    "Starting backup: {} files, {} bytes, {} threads",
-    total_files, total_bytes, concurrency
+    "Starting backup: {} files, {} bytes, {} threads, {}KB buffer, device={:?}",
+    total_files,
+    total_bytes,
+    concurrency,
+    profile.copy_buf_size / 1024,
+    profile.device_type
   ));
-
-  let source_root = canonical_source_root(&options.source_root);
 
   // 创建备份任务记录
   let task_id = create_backup_task(&db, &source_root, &options.dest_path, total_files, total_bytes)
@@ -256,7 +276,7 @@ pub async fn start_backup(
   upsert_pending_records(&db, &source_root, dest_root, &options.files)
     .map_err(|e| format!("Failed to record files: {}", e))?;
 
-  let copier = FileCopier::new(concurrency, strategy);
+  let copier = FileCopier::new(profile, concurrency, strategy);
   let result = copier.run(
     options.files.clone(),
     dest_root,
@@ -279,7 +299,14 @@ pub async fn start_backup(
     result.succeeded,
     result.copied_bytes,
     result.failed,
-    if is_cancelled { "cancelled" } else { "completed" },
+    if is_cancelled {
+      "cancelled"
+    } else if result.aborted {
+      // 设备掉线导致提前中止：未处理的文件仍是 pending，可以下次重试
+      "failed"
+    } else {
+      "completed"
+    },
     result.avg_speed_mbps,
   );
 
@@ -304,7 +331,7 @@ pub async fn get_failed_files(
   let conn = db.conn.lock().map_err(|e| e.to_string())?;
   let mut stmt = conn
     .prepare(
-      "SELECT relative_path, file_size, error_message, dest_path
+      "SELECT relative_path, file_size, error_message, dest_path, modified_at
        FROM files WHERE source_root = ?1 AND status = 'failed' AND error_message IS NOT NULL",
     )
     .map_err(|e| e.to_string())?;
@@ -321,6 +348,7 @@ pub async fn get_failed_files(
         dest_path: Some(row.get::<_, String>(3)?),
         file_size: row.get::<_, i64>(1)? as u64,
         error: row.get::<_, String>(2)?,
+        modified_at: row.get::<_, i64>(4)?,
       })
     })
     .map_err(|e| e.to_string())?;
@@ -355,7 +383,10 @@ pub async fn retry_failed_backup(
   let total_files = files.len() as u64;
   let total_bytes: u64 = files.iter().map(|f| f.file_size).sum();
   ensure_disk_space(dest_root, total_bytes)?;
-  let concurrency = concurrency.unwrap_or(4).clamp(1, 16);
+
+  let source_root = canonical_source_root(&source_root);
+  let profile = DeviceProfile::detect(Path::new(&source_root));
+  let concurrency = profile.clamp_concurrency(concurrency.unwrap_or(4));
   let strategy = ConflictStrategy::from_str(
     conflict_strategy.as_deref().unwrap_or("rename"),
   );
@@ -380,6 +411,8 @@ pub async fn retry_failed_backup(
         relative_path: f.relative_path,
         dest_relative_path: Some(dest_relative_path),
         file_size: f.file_size,
+        // 失败记录透传数据库里的 mtime，重试时不必再逐个 stat 源端
+        modified_at: f.modified_at,
       }
     })
     .collect();
@@ -387,11 +420,13 @@ pub async fn retry_failed_backup(
   let progress = BackupProgressEmitter::new(Some(Arc::new(app.clone())), total_files, total_bytes);
 
   progress.emit_log(&format!(
-    "Retrying backup: {} files, {} bytes, {} threads",
-    total_files, total_bytes, concurrency
+    "Retrying backup: {} files, {} bytes, {} threads, {}KB buffer, device={:?}",
+    total_files,
+    total_bytes,
+    concurrency,
+    profile.copy_buf_size / 1024,
+    profile.device_type
   ));
-
-  let source_root = canonical_source_root(&source_root);
 
   let task_id = create_backup_task(&db, &source_root, &dest_path, total_files, total_bytes)
     .map_err(|e| format!("Failed to create backup task: {}", e))?;
@@ -399,7 +434,7 @@ pub async fn retry_failed_backup(
   upsert_pending_records(&db, &source_root, dest_root, &backup_files)
     .map_err(|e| format!("Failed to record files: {}", e))?;
 
-  let copier = FileCopier::new(concurrency, strategy);
+  let copier = FileCopier::new(profile, concurrency, strategy);
   let result = copier.run(
     backup_files.clone(),
     dest_root,
@@ -419,7 +454,7 @@ pub async fn retry_failed_backup(
     result.succeeded,
     result.copied_bytes,
     result.failed,
-    "completed",
+    if result.aborted { "failed" } else { "completed" },
     result.avg_speed_mbps,
   );
 

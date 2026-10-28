@@ -64,6 +64,7 @@ export interface FailedFile {
   dest_path?: string
   file_size: number
   error: string
+  modified_at?: number
 }
 
 /** files 表记录（历史详情页文件列表使用），字段与 Rust 侧保持一致。 */

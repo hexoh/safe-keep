@@ -87,11 +87,22 @@ fn space_avail(_path: &Path) -> (u64, u64) {
 }
 
 /// 后台线程监控挂载点变化，实时发出 `devices:changed` 事件
+///
+/// 注意：不能每轮都调用 `list_volumes()`。它对每个卷执行 statfs 读取容量，
+/// 而挂在 MTP / 网络文件系统上的卷，statfs 可能阻塞数秒甚至永久挂起——
+/// 一旦发生，整个设备变更检测就失效了。这里只做纯 readdir 的名字集合比对，
+/// 只有集合变化时才重建完整列表（含容量）。
 pub fn start_device_watcher(app: AppHandle) {
   std::thread::spawn(move || {
+    let mut last_names = mount_names();
     let mut last = list_volumes();
     loop {
       std::thread::sleep(std::time::Duration::from_millis(500));
+      let names = mount_names();
+      if names == last_names {
+        continue;
+      }
+      last_names = names;
       let now = list_volumes();
       if now != last {
         let _ = app.emit("devices:changed", &now);
@@ -99,6 +110,38 @@ pub fn start_device_watcher(app: AppHandle) {
       }
     }
   });
+}
+
+/// 仅列出挂载点名字集合，纯 readdir，不触发任何 statfs。
+#[cfg(target_os = "macos")]
+fn mount_names() -> Vec<String> {
+  let mut names = vec!["/".to_string()];
+  if let Ok(entries) = std::fs::read_dir("/Volumes") {
+    for entry in entries.flatten() {
+      let name = entry.file_name().to_string_lossy().to_string();
+      if !name.starts_with('.') {
+        names.push(name);
+      }
+    }
+  }
+  names.sort();
+  names
+}
+
+#[cfg(target_os = "linux")]
+fn mount_names() -> Vec<String> {
+  mount_points()
+    .into_iter()
+    .map(|p| p.to_string_lossy().to_string())
+    .collect()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn mount_names() -> Vec<String> {
+  mount_points()
+    .into_iter()
+    .map(|p| p.to_string_lossy().to_string())
+    .collect()
 }
 
 /// 各平台挂载点根列表

@@ -13,6 +13,12 @@ pub struct BackupFile {
   #[serde(default)]
   pub dest_relative_path: Option<String>,
   pub file_size: u64,
+  /// 扫描阶段已取得的修改时间（Unix 秒）。
+  ///
+  /// 带上它可以省掉备份前为每个文件重新 stat 源端的开销：在 MTP 设备上，
+  /// 那是一次完整的目录树串行往返（每个文件一次 GetObjectInfo）。
+  #[serde(default)]
+  pub modified_at: i64,
 }
 
 impl BackupFile {
@@ -32,6 +38,9 @@ pub struct FailedFile {
   pub dest_path: Option<String>,
   pub file_size: u64,
   pub error: String,
+  /// 数据库里记录的修改时间，重试时透传，避免再逐个 stat 源端。
+  #[serde(default)]
+  pub modified_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,6 +54,9 @@ pub struct BackupResult {
   pub avg_speed_mbps: f64,
   pub errors: Vec<String>,
   pub failed_files: Vec<FailedFile>,
+  /// 是否因设备级故障（掉线 / 挂载点失效）提前中止。
+  #[serde(default)]
+  pub aborted: bool,
   /// 成功复制的相对路径，仅用于后端更新数据库。
   #[serde(skip)]
   pub succeeded_files: Vec<String>,

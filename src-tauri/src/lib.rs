@@ -27,9 +27,7 @@ use tauri_plugin_updater; // required for plugin registration
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .manage(ScannerState {
-      scanner: std::sync::Mutex::new(None),
-    })
+    .manage(ScannerState::default())
     .manage(CountState {
       cancel: std::sync::Mutex::new(None),
     })

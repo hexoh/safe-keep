@@ -19,6 +19,8 @@ export interface StartBackupOptions {
     relative_path: string
     dest_relative_path?: string
     file_size: number
+    /** 扫描阶段已取得的修改时间（Unix 秒），避免备份前逐文件重新 stat 源端 */
+    modified_at?: number
   }>
   conflictStrategy?: string
   concurrency?: number
@@ -29,6 +31,8 @@ export interface FailedFile {
   relative_path: string
   file_size: number
   error: string
+  /** 数据库记录中的修改时间，重试时原样回传可避免重新 stat 源端 */
+  modified_at?: number
 }
 
 export interface BackupResult {

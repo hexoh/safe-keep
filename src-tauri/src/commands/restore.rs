@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::database::Database;
+use crate::device::profile::DeviceProfile;
 use crate::restorer::conflict::RestoreConflictStrategy;
 use crate::restorer::restore::restore_files;
 use crate::restorer::{RestoreFile, RestoreProgress, RestoreResult};
@@ -94,10 +95,19 @@ pub async fn start_restore(
   let file_count = options.files.len();
   let app_handle = Arc::new(app.clone());
 
+  // 还原是"写回源设备"，因此按目标设备决定缓冲与并发：
+  // MTP 的每次 write 都是一次协议往返，1MB 以上的缓冲能少一个数量级的往返。
+  let profile = DeviceProfile::detect(target_root);
+
   app_handle
     .emit(
       "restore:log",
-      serde_json::json!({"message": format!("Starting restore: {} files", file_count)}),
+      serde_json::json!({"message": format!(
+        "Starting restore: {} files, {}KB buffer, device={:?}",
+        file_count,
+        profile.copy_buf_size / 1024,
+        profile.device_type
+      )}),
     )
     .ok();
 
@@ -105,6 +115,7 @@ pub async fn start_restore(
     options.files,
     target_root,
     strategy,
+    profile,
     state.cancel.clone(),
     |total, processed, succeeded, failed, current_file| {
       let _ = app_handle.emit(
@@ -121,19 +132,18 @@ pub async fn start_restore(
   );
 
   // Update database: only mark the files that were actually restored.
+  // 单事务提交，避免几千条 UPDATE 各自触发一次 WAL 落盘。
   if !result.succeeded_file_ids.is_empty() {
-    if let Ok(conn) = db.conn.lock() {
-      let mut stmt = match conn.prepare("UPDATE files SET status = 'restored' WHERE id = ?1") {
-        Ok(stmt) => stmt,
-        Err(_) => {
-          app_handle
-            .emit("restore:complete", &result)
-            .map_err(|e| e.to_string())?;
-          return Ok(result);
+    if let Ok(mut conn) = db.conn.lock() {
+      if let Ok(tx) = conn.transaction() {
+        {
+          if let Ok(mut stmt) = tx.prepare("UPDATE files SET status = 'restored' WHERE id = ?1") {
+            for file_id in &result.succeeded_file_ids {
+              let _ = stmt.execute(rusqlite::params![file_id]);
+            }
+          }
         }
-      };
-      for file_id in &result.succeeded_file_ids {
-        let _ = stmt.execute(rusqlite::params![file_id]);
+        let _ = tx.commit();
       }
     }
   }

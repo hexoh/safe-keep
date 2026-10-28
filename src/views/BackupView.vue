@@ -120,7 +120,9 @@ async function begin() {
       source_path: f.path,
       relative_path: f.relative_path,
       dest_relative_path: destRelativePath(f),
-      file_size: f.file_size
+      file_size: f.file_size,
+      // 带上扫描时的 mtime：慢速设备上省掉一次完整的串行 stat 遍历
+      modified_at: f.modified_at
     })),
     conflictStrategy: settings.value.conflict_strategy,
     concurrency: settings.value.concurrent_threads
