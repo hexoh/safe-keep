@@ -209,13 +209,11 @@ watch(
 
     <!-- No files selected -->
     <DesignCard v-if="files.length === 0" class="status-panel">
-      <div class="status-body">
-        <span class="status-title">{{ $t('backup.no_files_title') }}</span>
-        <span class="status-sub">{{ $t('backup.no_files_hint') }}</span>
+      <DesignEmptyState :title="$t('backup.no_files_title')" :hint="$t('backup.no_files_hint')">
         <button class="btn-primary-sm" @click="router.push({ name: 'preview' })">
-          {{ $t('backup.back_to_preview') }}
+          ← {{ $t('backup.back_to_preview') }}
         </button>
-      </div>
+      </DesignEmptyState>
     </DesignCard>
 
     <!-- Ready to start (direct navigation) -->
@@ -644,6 +642,14 @@ watch(
   margin: 0 auto;
   flex-direction: column;
   gap: 12px;
+  justify-content: center;
+}
+
+/* 面板内的操作按钮按内容宽度收缩，避免拉成整行长条 */
+.status-body > button {
+  width: fit-content;
+  min-width: 96px;
+  align-self: flex-start;
   justify-content: center;
 }
 

@@ -270,13 +270,11 @@ function openPreview(f: FileEntry) {
 
     <template v-else-if="files.length === 0">
       <DesignCard class="status-panel">
-        <div class="status-body">
-          <span class="status-title">{{ $t('preview.empty_title') }}</span>
-          <span class="status-sub">{{ $t('preview.empty_hint') }}</span>
+        <DesignEmptyState :title="$t('preview.empty_title')" :hint="$t('preview.empty_hint')">
           <button class="btn-secondary-sm" @click="router.push({ name: 'home' })">
-            {{ $t('common.back') }}
+            ← {{ $t('common.back') }}
           </button>
-        </div>
+        </DesignEmptyState>
       </DesignCard>
     </template>
 
@@ -559,6 +557,14 @@ function openPreview(f: FileEntry) {
   margin: 0 auto;
   flex-direction: column;
   gap: 12px;
+  justify-content: center;
+}
+
+/* 面板内的操作按钮按内容宽度收缩，避免拉成整行长条 */
+.status-body > button {
+  width: fit-content;
+  min-width: 96px;
+  align-self: flex-start;
   justify-content: center;
 }
 
