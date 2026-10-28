@@ -110,7 +110,7 @@ impl FileCopier {
 
           let file = &files[idx];
           let src = Path::new(&file.source_path);
-          let rel = Path::new(&file.relative_path);
+          let rel = Path::new(file.dest_relative());
           let dest = dest_root.join(rel);
 
           // 创建父目录
@@ -121,11 +121,17 @@ impl FileCopier {
               failed_files.lock().unwrap().push(FailedFile {
                 source_path: file.source_path.clone(),
                 relative_path: file.relative_path.clone(),
+                dest_path: Some(dest.to_string_lossy().to_string()),
                 file_size: file.file_size,
                 error: e.to_string(),
               });
               failed_count.fetch_add(1, Ordering::SeqCst);
-              let _ = tx.send((0, 0, String::new(), 0.0));
+              let _ = tx.send((
+                completed_files.load(Ordering::SeqCst),
+                copied_bytes.load(Ordering::SeqCst),
+                file.source_path.clone(),
+                0.0,
+              ));
               continue;
             }
           }
@@ -136,10 +142,17 @@ impl FileCopier {
             super::conflict::ConflictAction::Skip => {
               // 文件已存在且策略为跳过
               succeeded_files.lock().unwrap().push(file.relative_path.clone());
+              let completed = completed_files.fetch_add(1, Ordering::SeqCst) + 1;
+              let total_copied =
+                copied_bytes.fetch_add(file.file_size, Ordering::SeqCst) + file.file_size;
               let _ = tx.send((
-                completed_files.fetch_add(1, Ordering::SeqCst) + 1,
-                copied_bytes.fetch_add(file.file_size, Ordering::SeqCst) + file.file_size,
-                file.source_path.clone(),
+                completed,
+                total_copied,
+                Path::new(&file.source_path)
+                  .file_name()
+                  .and_then(|n| n.to_str())
+                  .unwrap_or("?")
+                  .to_string(),
                 1.0,
               ));
               continue;
@@ -147,8 +160,8 @@ impl FileCopier {
             _ => {}
           }
 
-          // 执行复制
-          match copy_file(src, &resolved_dest, &cancel, &paused) {
+          // 执行复制：文件被占用等瞬时错误最多重试 3 次
+          match copy_with_retry(src, &resolved_dest, &cancel, &paused) {
             Ok(bytes_copied) => {
               let completed = completed_files.fetch_add(1, Ordering::SeqCst) + 1;
               let total_copied = copied_bytes.fetch_add(bytes_copied, Ordering::SeqCst) + bytes_copied;
@@ -166,11 +179,17 @@ impl FileCopier {
               failed_files.lock().unwrap().push(FailedFile {
                 source_path: file.source_path.clone(),
                 relative_path: file.relative_path.clone(),
+                dest_path: Some(resolved_dest.to_string_lossy().to_string()),
                 file_size: file.file_size,
                 error: e.to_string(),
               });
               failed_count.fetch_add(1, Ordering::SeqCst);
-              let _ = tx.send((0, 0, String::new(), 0.0));
+              let _ = tx.send((
+                completed_files.load(Ordering::SeqCst),
+                copied_bytes.load(Ordering::SeqCst),
+                file.source_path.clone(),
+                0.0,
+              ));
             }
           }
         }
@@ -189,7 +208,9 @@ impl FileCopier {
     drop(tx);
     let _ = progress_handle.join();
 
-    let succeeded = total_files - failed_count.load(Ordering::SeqCst);
+    let succeeded_list = succeeded_files.lock().unwrap().clone();
+    // 取消时未处理的文件既不算成功也不算失败，必须按实际成功列表统计。
+    let succeeded = succeeded_list.len() as u64;
     let final_copied = copied_bytes.load(Ordering::SeqCst);
     let duration = started_at.elapsed().as_secs_f64();
     let avg_speed = if duration > 0.0 {
@@ -200,7 +221,6 @@ impl FileCopier {
 
     let error_list = errors.lock().unwrap().clone();
     let failed_list = failed_files.lock().unwrap().clone();
-    let succeeded_list = succeeded_files.lock().unwrap().clone();
 
     Ok(BackupResult {
       total_files,
@@ -215,6 +235,38 @@ impl FileCopier {
       succeeded_files: succeeded_list,
     })
   }
+}
+
+/// 复制文件，瞬时错误（如文件被占用）最多重试 3 次，间隔 500ms。
+fn copy_with_retry(
+  src: &Path,
+  dest: &Path,
+  cancel: &AtomicBool,
+  paused: &AtomicBool,
+) -> Result<u64, String> {
+  const MAX_ATTEMPTS: u32 = 3;
+
+  let mut last_error = String::new();
+  for attempt in 0..MAX_ATTEMPTS {
+    if cancel.load(Ordering::SeqCst) {
+      return Err("cancelled".to_string());
+    }
+
+    match copy_file(src, dest, cancel, paused) {
+      Ok(bytes) => return Ok(bytes),
+      Err(e) => {
+        if e == "cancelled" {
+          return Err(e);
+        }
+        last_error = e;
+        if attempt + 1 < MAX_ATTEMPTS {
+          thread::sleep(std::time::Duration::from_millis(500));
+        }
+      }
+    }
+  }
+
+  Err(last_error)
 }
 
 fn copy_file(

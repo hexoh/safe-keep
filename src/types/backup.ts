@@ -61,6 +61,7 @@ export interface BackupResult {
 export interface FailedFile {
   source_path: string
   relative_path: string
+  dest_path?: string
   file_size: number
   error: string
 }

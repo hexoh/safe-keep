@@ -7,14 +7,29 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupFile {
   pub source_path: String,
+  /// 源目录内的相对路径，用于数据库唯一标识与还原。
   pub relative_path: String,
+  /// 目标目录内的相对路径（按日期归档 / 平铺时与 relative_path 不同）。
+  #[serde(default)]
+  pub dest_relative_path: Option<String>,
   pub file_size: u64,
+}
+
+impl BackupFile {
+  pub fn dest_relative(&self) -> &str {
+    self
+      .dest_relative_path
+      .as_deref()
+      .unwrap_or(&self.relative_path)
+  }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailedFile {
   pub source_path: String,
   pub relative_path: String,
+  #[serde(default)]
+  pub dest_path: Option<String>,
   pub file_size: u64,
   pub error: String,
 }

@@ -169,6 +169,7 @@
   "cleanup.delete_strategy": "Delete Strategy",
   "cleanup.permanent_delete": "Permanent Delete",
   "cleanup.move_to_trash": "Move to Trash",
+  "cleanup.mtp_warning": "This device is connected via MTP. Deleted files cannot be recovered from the device, but you can restore them from the backup folder.",
   "cleanup.permanent_hint": "Files were permanently deleted.",
   "cleanup.recycle_hint": "Files were moved to the recycle bin.",
   "cleanup.result_title": "Cleanup Result",
@@ -312,7 +313,8 @@
 
   "storage.backup_drive": "Backup Drive",
   "storage.free_space": "{size} free",
-  "storage.used_space": "{used} / {total} GB used",
+  "storage.used_space": "{used} / {total} used",
+  "storage.not_detected": "Not detected",
 
   "device.mtp": "MTP Device",
   "device.removable": "Removable Disk",
@@ -369,5 +371,6 @@
   "updater.available": "New version {version} available",
   "updater.install": "Update Now",
   "updater.install_failed": "Update failed: {error}",
-  "updater.checking": "Checking for updates..."
+  "updater.checking": "Checking for updates...",
+  "errors.disk_full": "Not enough space on the destination disk: {required} required, only {available} available."
 }

@@ -31,6 +31,8 @@ const files = computed(() => scanStore.files)
 const selectionInitialized = ref(false)
 
 function selectable(f: FileEntry): boolean {
+  // 未开启“排除已备份文件”时，允许用户重新勾选已备份文件强制复制。
+  if (f.status === 'backed_up') return scanStore.options?.exclude_backed_up === false
   return f.status === 'new' || f.status === 'changed'
 }
 

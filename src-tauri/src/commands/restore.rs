@@ -75,6 +75,10 @@ pub async fn start_restore(
 ) -> Result<RestoreResult, String> {
   state.cancel.store(false, Ordering::SeqCst);
 
+  if options.source_root.trim().is_empty() {
+    return Err("Restore source is required".to_string());
+  }
+
   let target_root = Path::new(&options.restore_target);
   if !target_root.exists() {
     std::fs::create_dir_all(target_root).map_err(|e| e.to_string())?;

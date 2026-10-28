@@ -5,9 +5,22 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
-use super::filter::is_supported_file;
+use super::filter::{is_ignored_dir, is_ignored_file, is_supported_file};
 use super::progress::ScanProgressEmitter;
 use super::{FileEntry, ScanResult};
+
+fn is_ignored_entry(entry: &walkdir::DirEntry) -> bool {
+  // 根目录本身永远保留，即使用户选择的是隐藏目录。
+  if entry.depth() == 0 {
+    return false;
+  }
+  let name = entry.file_name().to_string_lossy();
+  if entry.file_type().is_dir() {
+    is_ignored_dir(&name)
+  } else {
+    is_ignored_file(&name)
+  }
+}
 
 pub struct FileScanner {
   cancelled: Arc<AtomicBool>,
@@ -33,14 +46,9 @@ impl FileScanner {
       .follow_links(false)
       .same_file_system(false)
       .into_iter()
+      .filter_entry(|e| !is_ignored_entry(e))
       .filter_map(|e| e.ok())
       .filter(|e| e.file_type().is_file())
-      .filter(|e| {
-        let name = e.file_name().to_string_lossy();
-        !name.starts_with("._")
-          && name != ".DS_Store"
-          && !name.starts_with(".")
-      })
       .filter(|e| is_supported_file(e.path()))
       .collect();
 

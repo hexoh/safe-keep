@@ -4,6 +4,7 @@ import { useScanStore } from '@/stores/scan'
 import { useBackup } from '@/composables/useBackup'
 import { useSettings } from '@/composables/useSettings'
 import { formatBytes, formatDuration, formatSpeed } from '@/utils/format'
+import { translateError } from '@/utils/errors'
 import type { StartBackupOptions } from '@/api/backup'
 
 const router = useRouter()
@@ -24,6 +25,27 @@ const files = computed(() => {
 const sourceRoot = computed(() => scanStore.options?.source_path ?? '')
 const destPath = computed(() => scanStore.options?.dest_path ?? '')
 const totalSize = computed(() => files.value.reduce((sum, f) => sum + f.file_size, 0))
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+/** 根据首页选择的“组织方式”计算目标目录内的相对路径。 */
+function destRelativePath(file: { file_name: string; relative_path: string; modified_at: number }) {
+  const mode = scanStore.options?.organize_by
+  if (!mode) return file.relative_path
+
+  const date = new Date(file.modified_at * 1000)
+  if (Number.isNaN(date.getTime())) return file.relative_path
+
+  const year = date.getFullYear()
+  const month = pad2(date.getMonth() + 1)
+  const day = pad2(date.getDate())
+
+  if (mode === 'Flat') return file.file_name
+  if (mode === 'YYYY/MM') return `${year}/${month}/${file.file_name}`
+  return `${year}/${month}/${day}/${file.file_name}`
+}
 
 const canStart = computed(
   () => !started.value && files.value.length > 0 && !!sourceRoot.value && !!destPath.value
@@ -97,6 +119,7 @@ async function begin() {
     files: files.value.map((f) => ({
       source_path: f.path,
       relative_path: f.relative_path,
+      dest_relative_path: destRelativePath(f),
       file_size: f.file_size
     })),
     conflictStrategy: settings.value.conflict_strategy,
@@ -213,7 +236,7 @@ watch(
       <DesignCard v-if="phase === 'error'" class="status-panel">
         <div class="status-body">
           <span class="status-title text-failed">{{ $t('backup.failed_title') }}</span>
-          <span class="status-sub mono-sm">{{ error }}</span>
+          <span class="status-sub mono-sm">{{ error ? translateError(error) : '' }}</span>
           <div class="status-actions">
             <button class="btn-secondary-sm" @click="router.push({ name: 'preview' })">
               {{ $t('common.back') }}

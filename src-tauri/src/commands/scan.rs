@@ -19,6 +19,8 @@ pub struct ScanOptions {
   pub include_videos: Option<bool>,
   pub min_size: Option<u64>,
   pub max_size: Option<u64>,
+  /// 增量模式：过滤掉数据库中已确认备份且未变更的文件。
+  pub exclude_backed_up: Option<bool>,
 }
 
 #[allow(dead_code)]
@@ -58,21 +60,28 @@ pub async fn count_files(path: String, state: State<'_, CountState>) -> Result<(
     for entry in walkdir::WalkDir::new(root)
       .follow_links(false)
       .into_iter()
+      .filter_entry(|e| {
+        if e.depth() == 0 {
+          return true;
+        }
+        let name = e.file_name().to_string_lossy();
+        if e.file_type().is_dir() {
+          !crate::scanner::filter::is_ignored_dir(&name)
+        } else {
+          !crate::scanner::filter::is_ignored_file(&name)
+        }
+      })
       .filter_map(|e| e.ok())
     {
       if flag_scan.load(Ordering::Relaxed) {
         break;
       }
-      if entry.file_type().is_file() {
-        let name = entry.file_name().to_string_lossy();
-        if name.starts_with("._") || name == ".DS_Store" || name.starts_with('.') {
-          continue;
-        }
-        if crate::scanner::filter::is_supported_file(entry.path()) {
-          count += 1;
-          if let Ok(m) = entry.metadata() {
-            bytes += m.len();
-          }
+      if entry.file_type().is_file()
+        && crate::scanner::filter::is_supported_file(entry.path())
+      {
+        count += 1;
+        if let Ok(m) = entry.metadata() {
+          bytes += m.len();
         }
       }
     }
@@ -151,7 +160,11 @@ pub async fn start_scan(
   }
 
   // 增量对比：与数据库记录比对，标记状态
-  let files = compare::compute_file_statuses(&db, &source_root, files)?;
+  let mut files = compare::compute_file_statuses(&db, &source_root, files)?;
+
+  if options.exclude_backed_up == Some(true) {
+    files.retain(|f| f.status != "backed_up");
+  }
 
   let total_files = files.len() as u64;
   let total_size = files.iter().map(|f| f.file_size).sum();

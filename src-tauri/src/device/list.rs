@@ -40,6 +40,12 @@ pub fn list_volumes() -> Vec<DeviceVolume> {
     .collect()
 }
 
+/// 获取指定路径所在卷的可用空间；无法读取时返回 None（例如 Windows）。
+pub fn available_space(path: &Path) -> Option<u64> {
+  let (_, free) = space_avail(path);
+  (free > 0).then_some(free)
+}
+
 /// 通过 statvfs 获取卷的总容量与可用容量
 #[cfg(target_os = "macos")]
 fn space_avail(path: &Path) -> (u64, u64) {
@@ -155,11 +161,7 @@ fn system_volume_name() -> String {
 
 #[cfg(target_os = "macos")]
 fn platform_type(mnt: &str) -> DeviceType {
-  if mnt.starts_with("/Volumes/") {
-    DeviceType::RemovableDisk
-  } else {
-    DeviceType::LocalDisk
-  }
+  super::detect::detect_device_type(mnt)
 }
 
 #[cfg(target_os = "linux")]
@@ -186,8 +188,8 @@ fn mount_points() -> Vec<std::path::PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_type(_mnt: &str) -> DeviceType {
-  DeviceType::RemovableDisk
+fn platform_type(mnt: &str) -> DeviceType {
+  super::detect::detect_device_type(mnt)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

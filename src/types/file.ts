@@ -22,6 +22,8 @@ export interface ScanResult {
   total_size: number
 }
 
+export type OrganizeMode = 'YYYY/MM/DD' | 'YYYY/MM' | 'Flat'
+
 export interface ScanOptions {
   source_path: string
   dest_path?: string
@@ -29,4 +31,8 @@ export interface ScanOptions {
   include_videos?: boolean
   min_size?: number
   max_size?: number
+  /** 目标目录组织方式：按日期归档或平铺。 */
+  organize_by?: OrganizeMode
+  /** 增量模式：扫描阶段直接过滤已备份且未变更的文件。 */
+  exclude_backed_up?: boolean
 }

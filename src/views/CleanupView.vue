@@ -3,6 +3,8 @@ import { ElMessage } from 'element-plus'
 import { useCleanup } from '@/composables/useCleanup'
 import { useSettings } from '@/composables/useSettings'
 import { getSourceRoots } from '@/api/cleanup'
+import { detectDevice } from '@/api/device'
+import type { DeviceType } from '@/api/device'
 import { formatBytes, formatIsoDateTime } from '@/utils/format'
 import { i18n } from '@/locales'
 import type { CleanupFile, CleanupFilter } from '@/types/cleanup'
@@ -36,7 +38,26 @@ const cleanupPct = computed(() => {
   return Math.min(100, Math.round((p.processed / p.total_files) * 100))
 })
 
+const deviceType = ref<DeviceType | null>(null)
+
 const deleteStrategy = computed(() => settings.value.delete_strategy)
+
+// MTP 设备不支持回收站，必须使用永久删除。
+const effectivePermanent = computed(
+  () => deleteStrategy.value === 'permanent' || deviceType.value === 'MTP'
+)
+
+async function updateDeviceType() {
+  if (!sourceRoot.value) {
+    deviceType.value = null
+    return
+  }
+  try {
+    deviceType.value = await detectDevice(sourceRoot.value)
+  } catch {
+    deviceType.value = null
+  }
+}
 
 function mbToBytes(value: string): number | undefined {
   const n = Number(value)
@@ -117,7 +138,7 @@ function cancelConfirm() {
 async function confirmExecute() {
   if (!selectedFiles.value.length) return
   confirmStep.value = false
-  await execute([...selectedFiles.value], deleteStrategy.value === 'permanent')
+  await execute([...selectedFiles.value], effectivePermanent.value)
   if (error.value) {
     ElMessage.error(i18n.global.t('cleanup.execute_failed'))
     return
@@ -144,6 +165,7 @@ watch(sourceRoot, () => {
   cleanupResult.value = null
   selected.value = new Set()
   confirmStep.value = false
+  void updateDeviceType()
 })
 </script>
 
@@ -155,6 +177,10 @@ watch(sourceRoot, () => {
         <p>{{ $t('cleanup.subtitle') }}</p>
       </div>
       <div class="warning-badge">{{ $t('cleanup.warning') }}</div>
+    </div>
+
+    <div v-if="deviceType === 'MTP'" class="mtp-warning">
+      {{ $t('cleanup.mtp_warning') }}
     </div>
 
     <DesignCard padding="18px">
@@ -347,11 +373,7 @@ watch(sourceRoot, () => {
       <div class="result-header">
         <DesignLabel :text="$t('cleanup.result_title')" />
         <span class="mono-sm muted">
-          {{
-            deleteStrategy === 'permanent'
-              ? $t('cleanup.permanent_hint')
-              : $t('cleanup.recycle_hint')
-          }}
+          {{ effectivePermanent ? $t('cleanup.permanent_hint') : $t('cleanup.recycle_hint') }}
         </span>
       </div>
       <div class="result-grid">
@@ -427,6 +449,16 @@ watch(sourceRoot, () => {
   border: 1px solid rgb(245 158 11 / 35%);
   border-radius: 7px;
   flex-shrink: 0;
+}
+
+.mtp-warning {
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--modified);
+  background: var(--modified-bg);
+  border: 1px solid rgb(245 158 11 / 30%);
+  border-radius: 7px;
 }
 
 .filter-grid {

@@ -9,11 +9,8 @@ pub fn detect_device_type(path: &str) -> DeviceType {
   if is_mtp_path(path) {
     return DeviceType::MTP;
   }
-  if is_removable_path(path) {
-    return DeviceType::RemovableDisk;
-  }
 
-  // 平台特定检测
+  // 平台特定检测（macOS / Linux 会通过 statfs 区分 MTP 与可移动磁盘）
   platform_detect(path)
 }
 
@@ -29,21 +26,6 @@ fn is_mtp_path(path: &Path) -> bool {
     return true;
   }
   false
-}
-
-/// 可移动磁盘路径特征（macOS /Volumes 下非系统卷）
-fn is_removable_path(path: &Path) -> bool {
-  let s = path.to_string_lossy();
-  if cfg!(target_os = "macos") && s.starts_with("/Volumes/") && !is_system_volume(&s) {
-    return true;
-  }
-  false
-}
-
-fn is_system_volume(path_str: &str) -> bool {
-  path_str.starts_with("/System/Volumes")
-    || path_str.starts_with("/Volumes/Recovery")
-    || path_str.starts_with("/Volumes/VM")
 }
 
 /// macOS: 使用 statfs 检测文件系统类型
@@ -92,6 +74,9 @@ fn platform_detect(_path: &Path) -> DeviceType {
   let s = _path.to_string_lossy();
   if s.contains("/gvfs/") || (s.contains("/run/user") && s.contains("/gvfs")) {
     return DeviceType::MTP;
+  }
+  if s.starts_with("/media/") || s.starts_with("/mnt/") || s.starts_with("/run/media/") {
+    return DeviceType::RemovableDisk;
   }
   DeviceType::LocalDisk
 }

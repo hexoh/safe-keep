@@ -14,7 +14,12 @@ export async function getBackupTasks(): Promise<BackupTask[]> {
 export interface StartBackupOptions {
   sourceRoot: string
   destPath: string
-  files: Array<{ source_path: string; relative_path: string; file_size: number }>
+  files: Array<{
+    source_path: string
+    relative_path: string
+    dest_relative_path?: string
+    file_size: number
+  }>
   conflictStrategy?: string
   concurrency?: number
 }

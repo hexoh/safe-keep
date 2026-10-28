@@ -44,7 +44,8 @@ pub fn compute_file_statuses(
             dest_path: r.dest_path,
             file_size: r.file_size,
             modified_at: r.modified_at,
-            backed_up: matches!(r.status.as_str(), "backed_up" | "verified"),
+            // restored 表示文件已从备份还原回源端，备份副本仍然有效。
+            backed_up: matches!(r.status.as_str(), "backed_up" | "verified" | "restored"),
           },
         )
       })

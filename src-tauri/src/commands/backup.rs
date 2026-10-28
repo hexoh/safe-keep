@@ -14,6 +14,9 @@ use crate::copier::{BackupFile, BackupResult, FailedFile};
 use crate::database::models::{BackupHistoryEntry, BackupTask};
 use crate::database::queries;
 use crate::database::Database;
+use crate::device::list::available_space;
+
+const ERR_DISK_FULL: &str = "ERR_DISK_FULL";
 
 fn create_backup_task(
   db: &Database,
@@ -83,7 +86,7 @@ fn upsert_pending_records(
   for file in files {
     let (file_name, modified_at) = record_meta(&file.source_path);
     let dest_path = dest_root
-      .join(&file.relative_path)
+      .join(file.dest_relative())
       .to_string_lossy()
       .to_string();
 
@@ -136,7 +139,7 @@ fn update_backup_records(
 
   for file in files {
     let dest_path = dest_root
-      .join(&file.relative_path)
+      .join(file.dest_relative())
       .to_string_lossy()
       .to_string();
 
@@ -184,6 +187,19 @@ pub struct StartBackupOptions {
   pub concurrency: Option<usize>,
 }
 
+/// 备份前检查目标卷剩余空间，空间不足时返回可被前端识别的错误码。
+fn ensure_disk_space(dest_root: &Path, required: u64) -> Result<(), String> {
+  if let Some(available) = available_space(dest_root) {
+    if required > available {
+      return Err(format!(
+        "{}: need {} bytes, only {} bytes available",
+        ERR_DISK_FULL, required, available
+      ));
+    }
+  }
+  Ok(())
+}
+
 fn canonical_source_root(source_root: &str) -> String {
   fs::canonicalize(source_root)
     .map(|p| p.to_string_lossy().to_string())
@@ -212,6 +228,8 @@ pub async fn start_backup(
 
   let total_files = options.files.len() as u64;
   let total_bytes: u64 = options.files.iter().map(|f| f.file_size).sum();
+
+  ensure_disk_space(dest_root, total_bytes)?;
 
   let concurrency = options.concurrency.unwrap_or(4).clamp(1, 16);
   let strategy = ConflictStrategy::from_str(
@@ -285,16 +303,21 @@ pub async fn get_failed_files(
   let conn = db.conn.lock().map_err(|e| e.to_string())?;
   let mut stmt = conn
     .prepare(
-      "SELECT relative_path, file_size, error_message
+      "SELECT relative_path, file_size, error_message, dest_path
        FROM files WHERE source_root = ?1 AND status = 'failed' AND error_message IS NOT NULL",
     )
     .map_err(|e| e.to_string())?;
 
   let rows = stmt
     .query_map(rusqlite::params![source_root], |row| {
+      let relative_path: String = row.get(0)?;
       Ok(FailedFile {
-        source_path: String::new(),
-        relative_path: row.get(0)?,
+        source_path: Path::new(&source_root)
+          .join(&relative_path)
+          .to_string_lossy()
+          .to_string(),
+        relative_path,
+        dest_path: Some(row.get::<_, String>(3)?),
         file_size: row.get::<_, i64>(1)? as u64,
         error: row.get::<_, String>(2)?,
       })
@@ -330,6 +353,7 @@ pub async fn retry_failed_backup(
 
   let total_files = files.len() as u64;
   let total_bytes: u64 = files.iter().map(|f| f.file_size).sum();
+  ensure_disk_space(dest_root, total_bytes)?;
   let concurrency = concurrency.unwrap_or(4).clamp(1, 16);
   let strategy = ConflictStrategy::from_str(
     conflict_strategy.as_deref().unwrap_or("rename"),
@@ -337,13 +361,25 @@ pub async fn retry_failed_backup(
 
   let backup_files: Vec<BackupFile> = files
     .into_iter()
-    .map(|f| BackupFile {
-      source_path: std::path::Path::new(&source_root)
-        .join(&f.relative_path)
-        .to_string_lossy()
-        .to_string(),
-      relative_path: f.relative_path,
-      file_size: f.file_size,
+    .map(|f| {
+      // 失败记录中保存了完整目标路径；按目标根目录还原出相对路径，
+      // 这样按日期归档 / 平铺的任务重试时不会把文件写回源目录结构。
+      let dest_relative_path = f
+        .dest_path
+        .as_deref()
+        .and_then(|p| Path::new(p).strip_prefix(dest_root).ok())
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| f.relative_path.clone());
+
+      BackupFile {
+        source_path: Path::new(&source_root)
+          .join(&f.relative_path)
+          .to_string_lossy()
+          .to_string(),
+        relative_path: f.relative_path,
+        dest_relative_path: Some(dest_relative_path),
+        file_size: f.file_size,
+      }
     })
     .collect();
 

@@ -12,6 +12,7 @@ import { useSettings } from '@/composables/useSettings'
 
 const STATE_KEY = 'safe-keep.last-device'
 const PRESET_KEY = 'safe-keep.last-preset'
+const LAST_DRIVE_KEY = 'safe-keep.last-drive'
 
 // 每个驱动器的记忆对象: { src: 上次源路径, dst: 上次目标路径 }
 type DriveState = { src?: string; dst?: string }
@@ -55,16 +56,30 @@ const { devices: volumes, refresh, watchDevices } = useDevice()
 const { settings: appSettings, load: loadAppSettings } = useSettings()
 
 onMounted(async () => {
-  initSrcPath()
   await loadAppSettings()
-  initDstPath()
   try {
     await refresh()
   } catch {
     // ignore device read errors, keep source path as-is
   }
+  restoreLastDevice()
+  loadPreset()
+  await initSrcPath()
+  await initDstPath()
   watchDevices()
 })
+
+// 启动时恢复上次选择的设备，而不是固定落到系统盘。
+function restoreLastDevice() {
+  let last = ''
+  try {
+    last = localStorage.getItem(LAST_DRIVE_KEY) || ''
+  } catch {
+    // ignore
+  }
+  const index = volumes.value.findIndex((v) => v.path === last)
+  srcDev.value = index >= 0 ? index : 0
+}
 
 const srcPath = ref('')
 const srcStats = ref<{ count: number; bytes: number }>({ count: 0, bytes: 0 })
@@ -171,6 +186,7 @@ const srcDev = ref(0)
 const org = ref(1)
 const minSz = ref('0')
 const maxSz = ref('')
+const excludeBackedUp = ref(true)
 const fmts = reactive({
   jpg: true,
   heic: true,
@@ -245,6 +261,13 @@ async function selectDev(i: number) {
   srcDev.value = i
   const device = volumes.value[i]
   const drivePath = device?.path
+  if (drivePath) {
+    try {
+      localStorage.setItem(LAST_DRIVE_KEY, drivePath)
+    } catch {
+      // ignore
+    }
+  }
   let p = loadLastSrcPath(drivePath)
   if (!p && device?.device_type === 'LocalDisk' && drivePath) {
     try {
@@ -309,25 +332,27 @@ function startScan() {
     include_images: imagesOn,
     include_videos: videosOn,
     min_size: mbToBytes(minSz.value),
-    max_size: mbToBytes(maxSz.value)
+    max_size: mbToBytes(maxSz.value),
+    organize_by: orgOpts[org.value],
+    exclude_backed_up: excludeBackedUp.value
   })
   router.push({ name: 'preview' })
 }
 
 type Preset = {
-  srcDev: number
   org: number
   minSz: string
   maxSz: string
+  excludeBackedUp: boolean
   fmts: typeof fmts
 }
 
 function savePreset() {
   const preset: Preset = {
-    srcDev: srcDev.value,
     org: org.value,
     minSz: minSz.value,
     maxSz: maxSz.value,
+    excludeBackedUp: excludeBackedUp.value,
     fmts: { ...fmts }
   }
   try {
@@ -335,6 +360,37 @@ function savePreset() {
     ElMessage.success(i18n.global.t('home.preset_saved'))
   } catch {
     ElMessage.error(i18n.global.t('home.preset_save_failed'))
+  }
+}
+
+// 读取上次保存的过滤条件预设，使“保存预设”真正可复用。
+function loadPreset() {
+  let raw: string | null = null
+  try {
+    raw = localStorage.getItem(PRESET_KEY)
+  } catch {
+    return
+  }
+  if (!raw) return
+
+  try {
+    const preset = JSON.parse(raw) as Partial<Preset>
+    if (typeof preset.org === 'number' && preset.org >= 0 && preset.org < orgOpts.length) {
+      org.value = preset.org
+    }
+    if (typeof preset.minSz === 'string') minSz.value = preset.minSz
+    if (typeof preset.maxSz === 'string') maxSz.value = preset.maxSz
+    if (typeof preset.excludeBackedUp === 'boolean') {
+      excludeBackedUp.value = preset.excludeBackedUp
+    }
+    if (preset.fmts && typeof preset.fmts === 'object') {
+      for (const key of Object.keys(fmts) as (keyof typeof fmts)[]) {
+        const value = preset.fmts[key]
+        if (typeof value === 'boolean') fmts[key] = value
+      }
+    }
+  } catch {
+    // ignore malformed preset
   }
 }
 </script>
@@ -496,6 +552,10 @@ function savePreset() {
               <input v-model="maxSz" :placeholder="$t('home.no_limit')" class="size-input" />
             </div>
           </div>
+          <label class="exclude-row">
+            <input v-model="excludeBackedUp" type="checkbox" class="exclude-check" />
+            <span>{{ $t('home.exclude_backed_up') }}</span>
+          </label>
         </div>
       </div>
     </DesignCard>
@@ -703,6 +763,20 @@ function savePreset() {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
+}
+
+.exclude-row {
+  display: flex;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-sec);
+  cursor: pointer;
+  align-items: center;
+  gap: 6px;
+}
+
+.exclude-check {
+  accent-color: var(--accent);
 }
 
 .page-actions {

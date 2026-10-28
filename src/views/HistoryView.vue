@@ -5,6 +5,7 @@ import type { FailedFile } from '@/api/backup'
 import { exportTasksCsv, exportTasksJson } from '@/api/export'
 import { useSettings } from '@/composables/useSettings'
 import { formatBytes, formatDuration, formatIsoDateTime, formatSpeed } from '@/utils/format'
+import { translateError } from '@/utils/errors'
 import { i18n } from '@/locales'
 import type { BackupTask } from '@/types/backup'
 
